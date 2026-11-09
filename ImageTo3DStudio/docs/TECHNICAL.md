@@ -144,16 +144,22 @@ largest visible flat face is perspective-rectified into an exemplar patch.
 - **Carving silhouettes** (visual hull and photo sets): interior holes are
   filled, except holes whose pixels match the background colour model
   (median weighted CIELAB distance below 5) and that cover at least 0.2 % of
-  the object: these are real gaps (chair-back slats, a mug handle) and are
-  carved through.
+  the object: these are real gaps (between chair-back slats, inside a mug
+  handle). Only their background-coloured pixels (distance below 8) are
+  opened, so thin parts the cut-out missed inside a gap stay solid.
+- **Determinism**: OpenCV's random generator is seeded before every graph
+  cut and k-means, so the same photo always gives the same model.
 - **Turntable** (unlabelled photos around the object): SIFT features, ratio
   test, essential matrix (RANSAC) and `recoverPose` between consecutive photos
   give the yaw steps. If fewer than half of the pairs match (plain surfaces),
-  equal steps are assumed and the signed step (10-120 degrees, then refined
-  to 0.5 degrees) and the camera elevation (0-35 degrees) are chosen by
-  silhouette coherence: carve a coarse 36-cell volume with all silhouettes,
-  reproject it into every photo and maximise the mean IoU with the
-  silhouettes (Hernandez, Schmitt and Cipolla 2007). The same score picks
+  equal steps are assumed and the signed step (10-120 degrees) and the camera
+  elevation (0-35 degrees) are chosen by silhouette coherence: carve a coarse
+  36-cell volume with all silhouettes, reproject it into every photo and
+  maximise the mean IoU with the silhouettes (Hernandez, Schmitt and Cipolla
+  2007). A fine stage on sharper masks (64 cells, steps of 0.5 degrees) takes
+  the coherence-weighted centre of all steps within 1 % of the best, because
+  the peak is flat; a set whose steps add up to about 360 degrees snaps to
+  360/n when that explains the silhouettes as well. The same score picks
   direction and elevation for SIFT-derived angles. Cameras share one model
   (distance from the object's pixel height, 2D shift from its bounding box).
   The final 128-cell volume takes, per voxel, the k-th largest signed distance
