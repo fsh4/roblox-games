@@ -212,12 +212,27 @@ def build_mug():
     ceramic = material("ceramic", (0.85, 0.2, 0.18), 0.25)
     bpy.ops.mesh.primitive_cylinder_add(vertices=64, radius=0.05, depth=0.1, location=(0, 0, 0.05))
     bpy.context.active_object.data.materials.append(ceramic)
+    bpy.ops.object.shade_smooth_by_angle(angle=math.radians(30))
     bpy.ops.mesh.primitive_torus_add(major_radius=0.03, minor_radius=0.009, location=(0.055, 0, 0.055), rotation=(math.pi / 2, 0, 0))
     bpy.context.active_object.data.materials.append(ceramic)
+    bpy.ops.object.shade_smooth()
 
 
 def main(out, only=None):
     os.makedirs(out, exist_ok=True)
+    if only == "turntable":
+        for k in range(8):
+            reset()
+            bpy.context.scene.render.resolution_x = 800
+            bpy.context.scene.render.resolution_y = 800
+            studio_backdrop((0.93, 0.93, 0.93))
+            build_chair()
+            light_and_camera((0, 0, 0.45), 2.6, k * 45.0, 14, 50)
+            render(os.path.join(out, f"chair_turn_{k:02d}.png"))
+        return
+    if only == "mug":
+        render_mug_views(out)
+        return
     if only == "plush":
         reset()
         bpy.context.scene.render.film_transparent = True
@@ -229,8 +244,16 @@ def main(out, only=None):
     reset()
     bpy.context.scene.render.film_transparent = True
     build_plush(); light_and_camera((0, 0, 0.4), 2.2, 0, 4, 60); render(os.path.join(out, "plush_render.png"))
-    for label, az in (("front", 0), ("side", -90), ("back", 180)):
-        reset(); studio_backdrop((0.96, 0.96, 0.96)); build_mug(); light_and_camera((0, 0, 0.05), 3, az, 0, ortho=0.22); render(os.path.join(out, f"mug_{label}.png"))
+    render_mug_views(out)
+
+
+def render_mug_views(out):
+    for label, az, el in (("front", 0, 0), ("side", -90, 0), ("back", 180, 0), ("top", 0, 89)):
+        reset()
+        studio_backdrop((0.96, 0.96, 0.96))
+        build_mug()
+        light_and_camera((0, 0, 0.05), 3, az, el, ortho=0.22)
+        render(os.path.join(out, f"mug_{label}.png"))
 
 
 if __name__ == "__main__":

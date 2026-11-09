@@ -409,11 +409,15 @@ def shade(
         vdir = camera.view_dirs(p)
         facing = np.sum(n * vdir, axis=1) < 0
         n[facing] = -n[facing]
+        ndl = np.clip(np.sum(n * ldir, axis=1), 0.0, 1.0)
         if shadows:
-            sh = _shadow_lookup(light_cam, light_depth, p + n * 0.02)
+            # Normal offset and slope-scaled bias in shadow-map texels: a fixed
+            # bias prints acne stripes on curved surfaces lit at grazing angles.
+            texel = 1.0 / light_cam.ortho_scale
+            slope = np.minimum(np.sqrt(np.maximum(1.0 - ndl * ndl, 0.0)) / np.maximum(ndl, 1e-3), 6.0)
+            sh = _shadow_lookup(light_cam, light_depth, p + n * (1.5 * texel), texel * (1.0 + 2.0 * slope))
         else:
             sh = np.ones(len(p))
-        ndl = np.clip(np.sum(n * ldir, axis=1), 0.0, 1.0)
         fill_dir = np.array([0.6, 0.35, 0.7])
         fill_dir /= np.linalg.norm(fill_dir)
         ndf = np.clip(np.sum(n * fill_dir, axis=1), 0.0, 1.0)
@@ -474,9 +478,12 @@ def _light_camera(vertices: np.ndarray, ldir: np.ndarray, res: int = 768) -> Cam
     return Camera(view, res, res, ortho_scale=res / (2.0 * floor_pad))
 
 
-def _shadow_lookup(light_cam: Camera, light_depth: np.ndarray, points: np.ndarray) -> np.ndarray:
+def _shadow_lookup(light_cam: Camera, light_depth: np.ndarray, points: np.ndarray, bias: Optional[np.ndarray] = None) -> np.ndarray:
+    """3x3 percentage-closer lookup; ``bias`` is the per-point depth tolerance."""
     xy, d, _ = light_cam.project(points)
     h, w = light_depth.shape
+    if bias is None:
+        bias = 0.03 * (1 + 0.02 * d)
     total = np.zeros(len(points))
     count = 0
     for dx in (-1.0, 0.0, 1.0):
@@ -484,7 +491,7 @@ def _shadow_lookup(light_cam: Camera, light_depth: np.ndarray, points: np.ndarra
             xi = np.clip(np.floor(xy[:, 0] + dx).astype(np.int64), 0, w - 1)
             yi = np.clip(np.floor(xy[:, 1] + dy).astype(np.int64), 0, h - 1)
             occ = light_depth[yi, xi]
-            total += (d <= occ + 0.03 * (1 + 0.02 * d)).astype(np.float64)
+            total += (d <= occ + bias).astype(np.float64)
             count += 1
     return total / count
 

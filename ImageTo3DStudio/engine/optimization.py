@@ -119,6 +119,23 @@ def decimate_mesh(mesh: g.Mesh, target: int, smooth_angle: float = 40.0) -> g.Me
     return g.recompute_normals(out, smooth_angle)
 
 
+def transfer_normals(source: g.Mesh, target: g.Mesh, k: int = 6) -> np.ndarray:
+    """Shading normals for ``target`` interpolated from a denser ``source`` of the same surface.
+
+    Decimated organic surfaces keep the smooth shading of the full-resolution
+    surface instead of the facet normals of their sliver triangles.
+    """
+    own = target.normals if target.normals is not None else g.vertex_normals(target)
+    if source.normals is None or len(source.vertices) < k:
+        return own
+    dist, idx = cKDTree(source.vertices).query(target.vertices, k=k)
+    w = 1.0 / np.maximum(dist, 1e-9)
+    n = np.einsum("nk,nkc->nc", w, source.normals[idx])
+    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+    agree = np.sum(n * own, axis=1) > 0.5
+    return np.where(agree[:, None], n, own)
+
+
 def _drop_bad_faces(mesh: g.Mesh) -> g.Mesh:
     f = mesh.faces
     keep = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
@@ -193,6 +210,8 @@ def enforce_budget(scene: Scene, budget: int, smooth_angle: float) -> Tuple[Scen
             from .reconstruction import _assign_chart_uvs
 
             m = decimate_mesh(p.mesh, a, smooth_angle)
+            if scene.meta.get("smooth_surface"):
+                m.normals = transfer_normals(p.mesh, m)
             _assign_chart_uvs(m)
             parts.append(Part(p.name, m, p.material, p.frame, p.grain_axis, "u", p.seed, p.photo, p.native, p.detail if p.detail is not None else p.mesh, p.group))
         else:

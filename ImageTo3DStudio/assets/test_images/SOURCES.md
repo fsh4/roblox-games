@@ -7,7 +7,7 @@
 | `table_render.png` | Synthetic render, same script (oak table on a studio backdrop). | Template fitting (table). |
 | `vase_render.png` | Synthetic render, same script (glazed lathe-turned vase). | Surface-of-revolution strategy. |
 | `plush_render.png` | Synthetic render with transparent background, same script (remeshed sphere plush toy). | Alpha-matte segmentation and silhouette inflation. |
-| `mug_front.png`, `mug_side.png`, `mug_back.png` | Synthetic orthographic renders, same script (mug with handle). | Multi-view visual hull. |
+| `mug_front.png`, `mug_side.png`, `mug_back.png`, `mug_top.png` | Synthetic orthographic renders, same script (mug with handle; front, left side, back and top view). | Multi-view visual hull. |
 
 The synthetic objects are modelled in the render script independently of the
 engine's templates, so tests do not grade the engine on its own geometry. They

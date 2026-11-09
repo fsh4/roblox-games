@@ -636,6 +636,7 @@ def bake_ao(points: np.ndarray, normals: np.ndarray, vertices: np.ndarray, faces
     acc = np.zeros(len(points))
     wsum = np.zeros(len(points))
     bias = radius * 0.012
+    texel = 2.05 * radius / res
     offset = points + normals * bias * 0.5
     for d in fibonacci_sphere(directions):
         w = np.clip(np.sum(normals * d, axis=1), 0.0, 1.0)
@@ -648,7 +649,9 @@ def bake_ao(points: np.ndarray, normals: np.ndarray, vertices: np.ndarray, faces
         xy, z, _ = cam.project(offset[active])
         xi = np.clip(np.floor(xy[:, 0]).astype(np.int64), 0, res - 1)
         yi = np.clip(np.floor(xy[:, 1]).astype(np.int64), 0, res - 1)
-        visible = z <= depth[yi, xi] + bias
+        wa = w[active]
+        slope = np.minimum(np.sqrt(np.maximum(1.0 - wa * wa, 0.0)) / np.maximum(wa, 1e-3), 8.0)
+        visible = z <= depth[yi, xi] + bias + texel * slope
         if ground_y is not None and d[1] < -0.05:
             visible &= points[active, 1] < ground_y + bias
         acc[active] += visible * w[active]
@@ -672,14 +675,42 @@ def bake_detail_normals(texels: Texels, sel: np.ndarray, high: Mesh, samples: in
     nrm = np.einsum("nk,nkc->nc", bary, ntri)
     nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-9)
     tree = cKDTree(pts)
-    _, idx = tree.query(texels.pos[sel], k=4)
-    nh = nrm[idx].mean(axis=1)
+    dist, idx = tree.query(texels.pos[sel], k=8)
+    wts = 1.0 / np.maximum(dist, 1e-6)
+    nh = np.einsum("nk,nkc->nc", wts, nrm[idx]) / wts.sum(axis=1, keepdims=True)
     n_low = texels.nrm[sel]
     nh = np.where(np.sum(nh * n_low, axis=1, keepdims=True) < 0.2, n_low, nh)
     nh /= np.maximum(np.linalg.norm(nh, axis=1, keepdims=True), 1e-9)
     t, b = texels.tangent[sel], texels.bitangent[sel]
     ts = np.stack([np.sum(nh * t, 1), np.sum(nh * b, 1), np.sum(nh * n_low, 1)], axis=1)
     return ts / np.maximum(np.linalg.norm(ts, axis=1, keepdims=True), 1e-9)
+
+
+def smooth_texels(texels: Texels, values: np.ndarray, active: np.ndarray, sigma: float = 1.0, unit: bool = True) -> np.ndarray:
+    """Normalised Gaussian filter of per-texel values, one part at a time.
+
+    Removes sampling speckle (high-to-low normal transfer) and depth-map
+    banding (ambient occlusion), which otherwise show as fine streaks wherever
+    the UV charts are stretched. ``unit`` renormalises vectors afterwards.
+    """
+    import cv2
+
+    out = values.copy()
+    res = texels.res
+    for pid in np.unique(texels.part[active]):
+        sel = np.flatnonzero(active & (texels.part == pid))
+        r, c = texels.rows[sel], texels.cols[sel]
+        weight = np.zeros((res, res), np.float32)
+        weight[r, c] = 1.0
+        wb = cv2.GaussianBlur(weight, (0, 0), sigma)[r, c]
+        acc = np.empty((len(sel), values.shape[1]))
+        for ch in range(values.shape[1]):
+            img = np.zeros((res, res), np.float32)
+            img[r, c] = values[sel, ch]
+            acc[:, ch] = cv2.GaussianBlur(img, (0, 0), sigma)[r, c]
+        acc /= np.maximum(wb[:, None], 1e-6)
+        out[sel] = acc / np.maximum(np.linalg.norm(acc, axis=1, keepdims=True), 1e-9) if unit else acc
+    return out
 
 
 def height_to_normal(height_img: np.ndarray, mask: np.ndarray, density: float, strength: float = 1.0) -> np.ndarray:
@@ -841,18 +872,23 @@ def bake_scene(scene: Scene, options: BakeOptions, photo: Optional[PhotoProjecti
             ao = np.where(same_part, ao_sub[idx], 1.0)
         else:
             ao = ao_sub
+        ao = smooth_texels(tx, ao[:, None], np.ones(n, bool), sigma=1.0 + 0.5 * step, unit=False)[:, 0]
         ao = np.clip(ao * 1.08, 0, 1)
     report("ambient occlusion baked", 0.75)
 
     normal_ts = np.zeros((n, 3))
     normal_ts[:, 2] = 1.0
     if options.detail_normals:
+        baked = np.zeros(n, bool)
         for pi, part in enumerate(scene.parts):
             if part.detail is None:
                 continue
             sel = np.flatnonzero(tx.part == pi)
             if len(sel):
                 normal_ts[sel] = bake_detail_normals(tx, sel, part.detail)
+                baked[sel] = True
+        if baked.any():
+            normal_ts = smooth_texels(tx, normal_ts, baked)
     report("detail normals baked", 0.85)
 
     def img(values, channels):

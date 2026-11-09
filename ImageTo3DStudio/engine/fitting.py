@@ -38,8 +38,8 @@ class FitTarget:
 
 
 def _vertical_envelope(zones: np.ndarray, edges: np.ndarray) -> np.ndarray:
-    """Probable-object pixels: per column, from the top-most undecided edge above
-    the certain-object pixels down to the lowest certain-object pixel.
+    """Probable-object pixels: per column, from the top-most undecided edge down
+    to the first certain-object pixel below it.
 
     This captures surfaces that match the background colour (white bedding in
     front of a white wall) but are outlined by edges above solid parts.
@@ -52,10 +52,11 @@ def _vertical_envelope(zones: np.ndarray, edges: np.ndarray) -> np.ndarray:
         rows = np.flatnonzero(fg[:, x])
         if len(rows) == 0:
             continue
-        top_fg, bottom = rows.min(), rows.max()
+        top_fg = rows.min()
         above = np.flatnonzero(cand[:top_fg, x])
-        top = above.min() if len(above) else top_fg
-        span = slice(top, bottom + 1)
+        if len(above) == 0:
+            continue
+        span = slice(above.min(), top_fg + 1)
         out[span, x] = zones[span, x] != 0
     return out & (zones == 1)
 
@@ -96,14 +97,21 @@ def make_target(img: LoadedImage, seg: Segmentation, max_side: int = 320) -> Fit
     edges_full = edge_map(img.rgb)
     edges = cv2.resize(cv2.dilate(edges_full, np.ones((2, 2), np.uint8)), (fw, fh), interpolation=cv2.INTER_AREA) > 40
     dt = cv2.distanceTransform((~edges).astype(np.uint8), cv2.DIST_L2, 3).astype(np.float32)
+    probable = _vertical_envelope(zones, edges)
+    core = (zones == 2) | probable
+    hull = np.zeros((fh, fw), np.uint8)
+    pts = cv2.findNonZero(core.astype(np.uint8))
+    if pts is not None and len(pts) >= 3:
+        cv2.fillConvexPoly(hull, cv2.convexHull(pts), 1)
+    grow = max(3, int(0.05 * max(fw, fh)))
+    hull = cv2.dilate(hull, np.ones((2 * grow + 1, 2 * grow + 1), np.uint8)).astype(bool)
     near_edges = cv2.dilate(edges.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
-    obj = (zones == 2) | ((zones == 1) & near_edges)
+    obj = core | ((zones == 1) & near_edges & hull)
     ys, xs = np.nonzero(obj)
     if len(xs) == 0:
         bbox = (0.0, 0.0, float(fw), float(fh))
     else:
         bbox = (float(np.percentile(xs, 0.5)), float(np.percentile(ys, 0.5)), float(np.percentile(xs, 99.5)), float(np.percentile(ys, 99.5)))
-    probable = _vertical_envelope(zones, edges)
     return FitTarget(fw, fh, zones, edges, dt, bbox, 1.0 / s, probable)
 
 

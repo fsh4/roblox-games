@@ -3,7 +3,6 @@ import asyncio
 import itertools
 import time
 
-import discord
 import pytest
 
 from .conftest import image

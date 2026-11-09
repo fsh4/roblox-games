@@ -9,6 +9,7 @@ from PIL import Image
 
 from engine import analyzer as an
 from engine import pipeline
+from engine.reconstruction import TEMPLATE_ACCEPT_SCORE
 from engine.settings import BuildSettings
 
 from .conftest import image
@@ -24,7 +25,9 @@ def test_bed_photo_is_reconstructed_as_a_bed(bed_project):
     _, spec = bed_project
     assert spec["strategy"] == "template"
     assert spec["template"] == "bed"
-    assert spec["fit"]["score"] < 1.0
+    assert spec["fit"]["score"] < TEMPLATE_ACCEPT_SCORE
+    assert spec["fit"]["components"]["background_overlap"] < 0.1, "model silhouette spills onto the background"
+    assert spec["fit"]["components"]["object_missed"] < 0.2, "model misses part of the bed"
     assert spec["materials"]["frame"]["kind"] == "wood"
 
 
@@ -82,12 +85,12 @@ def test_generic_single_view_strategies(tmp_path, name, expected):
 
 
 def test_multi_view_visual_hull(tmp_path):
-    names = ["mug_front.png", "mug_side.png", "mug_back.png"]
+    names = ["mug_front.png", "mug_side.png", "mug_back.png", "mug_top.png"]
     srcs = [image(n) for n in names]
     (tmp_path / "source").mkdir()
     for s in srcs:
         shutil.copy(s, tmp_path / "source" / s.name)
-    spec = pipeline.analyse_project(str(tmp_path), [str(tmp_path / "source" / n) for n in names], mode="multi", view_labels=["front", "side", "back"])
+    spec = pipeline.analyse_project(str(tmp_path), [str(tmp_path / "source" / n) for n in names], mode="multi", view_labels=["front", "side", "back", "top"])
     assert spec["strategy"] == "visual_hull"
     spec, arrays = pipeline.load_spec(str(tmp_path))
     res = pipeline.build_version(str(tmp_path), str(tmp_path / "v1"), spec, arrays, BuildSettings(triangle_budget=4000, texture_resolution=256, quality="draft"), "Mug", "abcd1234", 1)

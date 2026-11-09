@@ -37,6 +37,10 @@ from .textures import PhotoProjection
 
 Progress = Optional[Callable[[str, float], None]]
 
+# Refined template fits scoring below this are accepted; worse fits fall back to
+# the generic strategies (revolve / extrude / inflate).
+TEMPLATE_ACCEPT_SCORE = 1.12
+
 CATEGORY_TEMPLATES = {
     "bed": "bed", "chair": "chair", "stool": "chair", "table": "table", "desk": "table",
     "sofa": "sofa", "couch": "sofa", "cabinet": "cabinet", "dresser": "cabinet", "drawer": "cabinet",
@@ -512,7 +516,7 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
     gy = np.arange(0, dims[1] + step, step)
     gz = np.arange(-dims[2] / 2, dims[2] / 2 + step, step)
     X, Y, Z = np.meshgrid(gx, gy, gz, indexing="ij")
-    occ = np.ones(X.shape, bool)
+    field_vol = np.full(X.shape, np.inf, np.float32)
     cams = []
     for lbl, s in views:
         x0, y0, x1, y1 = s.features.bbox
@@ -531,12 +535,14 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
             v = y1 - Y / dims[1] * bh
         else:
             u = (-X / dims[0] + 0.5) * bw + x0
-            v = (Z / dims[2] + 0.5) * bh + y0
-        mask = cv2.dilate(s.seg.filled.astype(np.uint8), np.ones((3, 3), np.uint8))
-        ui = np.clip(np.round(u).astype(np.int64), 0, mask.shape[1] - 1)
-        vi = np.clip(np.round(v).astype(np.int64), 0, mask.shape[0] - 1)
-        occ &= mask[vi, ui] > 0
+            v = (-Z / dims[2] + 0.5) * bh + y0
+        span_u = dims[0] if lbl in ("front", "back", "top") else dims[2]
+        span_v = dims[2] if lbl == "top" else dims[1]
+        studs_per_px = 0.5 * (span_u / bw + span_v / bh)
+        sdf = _silhouette_sdf(s.seg.filled, grow_px=1.0, smooth_px=0.5 * step / studs_per_px)
+        np.minimum(field_vol, _sample_field(sdf, u, v) * studs_per_px, out=field_vol)
         cams.append({"label": lbl, "bbox": [int(x0), int(y0), int(x1), int(y1)], "path_index": sources.index(s)})
+    occ = field_vol > 0
     if occ.sum() < 20:
         raise ReconstructionError("silhouettes do not intersect; check the view labels")
     spec = {
@@ -548,7 +554,36 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
         "notes": [f"Visual hull carved from {len(views)} labelled views ({', '.join(l for l, _ in views)}). Concavities that no silhouette reveals cannot be recovered."],
         "photo_projection": True,
     }
-    return Reconstruction(spec, {"occupancy": occ.astype(np.uint8)})
+    return Reconstruction(spec, {"occupancy": occ.astype(np.uint8), "field": _store_field(field_vol, step)})
+
+
+def _silhouette_sdf(mask: np.ndarray, grow_px: float = 0.0, smooth_px: float = 0.0) -> np.ndarray:
+    """Signed Euclidean distance to the silhouette outline in pixels, positive inside.
+
+    ``smooth_px`` low-pass filters the field before it is sampled on a coarser
+    voxel grid; without it the pixel staircase of the outline aliases into
+    visible bands on the carved surface.
+    """
+    m = (np.asarray(mask) > 0).astype(np.uint8)
+    inside = cv2.distanceTransform(np.pad(m, 1), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)[1:-1, 1:-1]
+    outside = cv2.distanceTransform(np.pad(1 - m, 1, constant_values=1), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)[1:-1, 1:-1]
+    sd = (inside - outside + grow_px).astype(np.float32)
+    if smooth_px > 0.5:
+        sd = cv2.GaussianBlur(sd, (0, 0), smooth_px)
+    return sd
+
+
+def _sample_field(img: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Bilinear lookup of a 2D field at pixel coordinates (u = column, v = row)."""
+    from scipy.ndimage import map_coordinates
+
+    return map_coordinates(img, [np.ravel(v), np.ravel(u)], order=1, mode="nearest").reshape(np.shape(u)).astype(np.float32)
+
+
+def _store_field(field_vol: np.ndarray, step: float) -> np.ndarray:
+    """Clamp a distance field to a narrow band around its surface for compact storage."""
+    band = 8.0 * step
+    return np.clip(field_vol, -band, band).astype(np.float16)
 
 
 def _intrinsics(img: an.LoadedImage) -> np.ndarray:
@@ -616,42 +651,44 @@ def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolu
     aspect = (x1 - x0 + 1) / max(y1 - y0 + 1, 1)
     half = max(aspect, 1.0) * height_studs * 0.6
     n = resolution
+    step = 2 * half / (n - 1)
     gx = np.linspace(-half, half, n)
-    gy = np.linspace(0, height_studs * 1.05, n)
-    gz = np.linspace(-half, half, n)
+    gy = np.arange(0.0, height_studs * 1.05 + step, step)
+    gz = gx.copy()
     X, Y, Z = np.meshgrid(gx, gy, gz, indexing="ij")
     pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
-    votes = np.zeros(len(pts), np.int32)
+    fields = np.empty((len(sources), len(pts)), np.float32)
     cams = []
-    for s, ang in zip(sources, angles):
+    for i, (s, ang) in enumerate(zip(sources, angles)):
         h, w = s.image.rgb.shape[:2]
         K = _intrinsics(s.image)
         bx0, by0, bx1, by1 = s.features.bbox
         obj_h_px = by1 - by0 + 1
-        dist = K[0, 0] * height_studs / max(obj_h_px, 1) * 1.0
+        dist = K[0, 0] * height_studs / max(obj_h_px, 1)
         cam = render.orbit_camera((0, height_studs / 2, 0), dist, ang, 10.0, w, h, 2 * np.degrees(np.arctan(h / 2 / K[1, 1])))
-        xy, d, _ = cam.project(pts)
+        xy, _, _ = cam.project(pts)
         shift = np.array([(bx0 + bx1) / 2 - w / 2, (by0 + by1) / 2 - h / 2])
         xy = xy + shift
-        m = cv2.dilate(s.seg.filled.astype(np.uint8), np.ones((5, 5), np.uint8))
-        xi = np.clip(xy[:, 0].astype(np.int64), 0, w - 1)
-        yi = np.clip(xy[:, 1].astype(np.int64), 0, h - 1)
         inside = (xy[:, 0] >= 0) & (xy[:, 0] < w) & (xy[:, 1] >= 0) & (xy[:, 1] < h)
-        votes += (inside & (m[yi, xi] > 0)).astype(np.int32)
+        studs_per_px = height_studs / max(obj_h_px, 1)
+        sdf = _silhouette_sdf(s.seg.filled, grow_px=2.0, smooth_px=0.5 * step / studs_per_px)
+        fields[i] = np.where(inside, _sample_field(sdf, xy[:, 0], xy[:, 1]) * studs_per_px, -8 * step)
         cams.append({"azimuth": float(ang), "distance": float(dist), "shift": shift.tolist(), "path_index": sources.index(s)})
-    need = max(len(sources) - 1, 2)
-    occ = (votes >= need).reshape(X.shape)
+    need = min(max(len(sources) - 1, 2), len(sources))
+    field_vol = np.sort(fields, axis=0)[-need].reshape(X.shape)
+    del fields
+    occ = field_vol > 0
     if occ.sum() < 30:
         raise ReconstructionError("photo silhouettes did not agree on a common volume")
     spec = {
         "strategy": "turntable", "category": "turntable",
         "dimensions": [float(2 * half), float(height_studs * 1.05), float(2 * half)],
-        "grid_origin": [float(gx[0]), float(gy[0]), float(gz[0])], "voxel_step": float(gx[1] - gx[0]),
+        "grid_origin": [float(gx[0]), float(gy[0]), float(gz[0])], "voxel_step": float(step),
         "views": cams, "confidence": 0.45,
         "notes": notes + ["Photo-set reconstruction assumes the camera circled the object at a similar height and distance."],
         "photo_projection": True,
     }
-    return Reconstruction(spec, {"occupancy": occ.astype(np.uint8)})
+    return Reconstruction(spec, {"occupancy": occ.astype(np.uint8), "field": _store_field(field_vol, step)})
 
 
 # ---------------------------------------------------------------------------
@@ -699,16 +736,29 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
     if chosen is None:
         report("comparing object templates", 0.08)
         target = make_target(src.image, src.seg)
-        candidates = [c for c, _ in ranking if c in TEMPLATES][:5]
-        scored = []
+        candidates = [c for c, _ in ranking if c in TEMPLATES and c != "box"][:6]
+        coarse = []
         for c in candidates:
             res = fit_template(get_template(c), target, coarse_only=True)
+            coarse.append((res.score, c))
+        coarse.sort()
+        shortlist = [c for _, c in coarse[:2]]
+        prior_best = next((c for c, _ in ranking if c in candidates), None)
+        if prior_best and prior_best not in shortlist:
+            shortlist.append(prior_best)
+        elif len(coarse) > 2:
+            shortlist.append(coarse[2][1])
+        coarse_by = {c: cs for cs, c in coarse}
+        scored = []
+        for i, (cs, c) in enumerate((coarse_by[c], c) for c in shortlist):
+            report(f"testing {c} template", 0.09 + 0.02 * i)
+            res = fit_template(get_template(c), target, max_evals=170)
             scored.append((res.score, c))
-            alternatives.append({"template": c, "coarse_score": round(res.score, 4)})
+            alternatives.append({"template": c, "coarse_score": round(cs, 4), "refined_score": round(res.score, 4)})
         scored.sort()
         best_score, best = scored[0]
         sym = src.features.symmetry
-        if best_score < 1.3:
+        if best_score < TEMPLATE_ACCEPT_SCORE:
             chosen = best
         elif sym > 0.9:
             chosen = "revolve"
@@ -778,25 +828,57 @@ def taubin_smooth(mesh: g.Mesh, iterations: int = 8, lam: float = 0.5, mu: float
 
 
 def _inflate_volume(mask: np.ndarray, dims, depth: float, res: int) -> Tuple[np.ndarray, list, float]:
-    """Occupancy volume of a silhouette inflated by sqrt(distance) (Teddy-like).
+    """Distance field (studs, positive inside) of a silhouette inflated by sqrt(distance).
 
+    Teddy-like inflation: the half thickness at a pixel grows with the square root
+    of its distance to the outline, so the surface meets the outline vertically.
     The mask is the cropped front view (rows top-down, columns left-right). Image
     left is the object's right (+X) because the camera looks at the front (-Z).
     """
     step = max(dims[0], dims[1]) / res
     nx = max(4, int(round(dims[0] / step)))
     ny = max(4, int(round(dims[1] / step)))
-    m = cv2.resize(mask.astype(np.uint8) * 255, (nx, ny), interpolation=cv2.INTER_AREA) > 127
-    dt = cv2.distanceTransform(np.pad(m, 1).astype(np.uint8), cv2.DIST_L2, 5)[1:-1, 1:-1]
-    if dt.max() <= 0:
+    sd_px = _silhouette_sdf(mask)
+    sd = cv2.resize(sd_px * (nx / max(mask.shape[1], 1)), (nx, ny), interpolation=cv2.INTER_AREA)
+    if sd.max() <= 0:
         raise ReconstructionError("empty silhouette")
-    half_t = np.sqrt(np.clip(dt / dt.max(), 0, 1)) * depth / 2
-    nz = max(4, int(round(depth / step)) + 2)
+    half_t = np.sqrt(np.clip(sd / sd.max(), 0, 1)) * depth / 2
+    nz = max(6, int(round(depth / step)) + 4)
     zc = (np.arange(nz) - (nz - 1) / 2) * step
-    rc = m[:, :, None] & (np.abs(zc[None, None, :]) <= half_t[:, :, None])
-    vol = np.transpose(rc[::-1, ::-1, :], (1, 0, 2))
+    az = np.abs(zc)[None, None, :]
+    fld = np.where(sd[:, :, None] > 0, half_t[:, :, None] - az, sd[:, :, None] * step - az)
+    vol = np.ascontiguousarray(np.transpose(fld[::-1, ::-1, :], (1, 0, 2)), dtype=np.float32)
     origin = [-dims[0] / 2, 0.0, float(zc[0])]
     return vol, origin, step
+
+
+def _field_mesh(field_vol: np.ndarray, origin, step: float, smooth_iters: int = 10) -> g.Mesh:
+    """Iso-surface of a continuous inside-positive field (sub-voxel accurate, no voxel steps)."""
+    from scipy.ndimage import gaussian_filter
+    from skimage.measure import marching_cubes
+
+    from scipy.ndimage import map_coordinates
+
+    f = np.asarray(field_vol, dtype=np.float32)
+    outside = float(min(f.min(), 0.0)) - step
+    vol = gaussian_filter(np.pad(f, 2, constant_values=outside), 0.9)
+    verts, faces, _, _ = marching_cubes(vol, 0.0)
+    origin = np.asarray(origin, dtype=np.float64)
+    mesh = g.Mesh((verts.astype(np.float64) - 2.0) * step + origin, faces.astype(np.int64))
+    if mesh.signed_volume() < 0:
+        mesh.faces = mesh.faces[:, ::-1].copy()
+    if smooth_iters:
+        mesh = taubin_smooth(mesh, smooth_iters)
+    # Shading normals from the field gradient: marching-cubes facets would print
+    # grid-aligned bands into the baked normal map.
+    coords = ((mesh.vertices - origin) / step + 2.0).T
+    grad = np.stack([map_coordinates(gc, coords, order=1, mode="nearest") for gc in np.gradient(vol)], axis=1)
+    length = np.linalg.norm(grad, axis=1, keepdims=True)
+    facet = g.vertex_normals(mesh)
+    analytic = -grad / np.maximum(length, 1e-12)
+    ok = (length[:, 0] > 1e-6) & (np.sum(analytic * facet, axis=1) > 0.3)
+    mesh.normals = np.where(ok[:, None], analytic, facet)
+    return mesh
 
 
 def build_generic_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> Scene:
@@ -837,21 +919,25 @@ def build_generic_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> 
     elif strategy == "inflate":
         mask = np.asarray(arrays["mask"]) > 0
         res = int(np.clip(40 + lod.q * 110, 40, 150))
-        vol, origin, step = _inflate_volume(mask, dims, dims[2], res)
-        mesh = _voxel_mesh(vol, origin, step, 6)
-        parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(vol, origin, step, "surface"))]
+        fld, origin, step = _inflate_volume(mask, dims, dims[2], res)
+        mesh = _field_mesh(fld, origin, step)
+        parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(fld > 0, origin, step, "surface"))]
     elif strategy in ("visual_hull", "turntable"):
-        occ = np.asarray(arrays["occupancy"]) > 0
         factor = 1 if lod.q > 0.6 else 2
-        if factor > 1:
-            occ = occ[::factor, ::factor, ::factor]
-        mesh = _voxel_mesh(occ, spec["grid_origin"], spec["voxel_step"] * factor, 6)
-        parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(occ, spec["grid_origin"], spec["voxel_step"] * factor, "surface"))]
+        step = spec["voxel_step"] * factor
+        if "field" in arrays:
+            fld = np.asarray(arrays["field"], dtype=np.float32)[::factor, ::factor, ::factor]
+            mesh = _field_mesh(fld, spec["grid_origin"], step)
+            occ = fld > 0
+        else:
+            occ = (np.asarray(arrays["occupancy"]) > 0)[::factor, ::factor, ::factor]
+            mesh = _voxel_mesh(occ, spec["grid_origin"], step, 6)
+        parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(occ, spec["grid_origin"], step, "surface"))]
     else:
         raise ReconstructionError(f"unknown strategy {strategy}")
     for p in parts:
         _assign_chart_uvs(p.mesh)
-    return Scene(spec.get("name", "Model"), parts, mats, {"strategy": strategy})
+    return Scene(spec.get("name", "Model"), parts, mats, {"strategy": strategy, "smooth_surface": strategy in ("inflate", "visual_hull", "turntable")})
 
 
 def _profile_bands(profile: np.ndarray, n: int):

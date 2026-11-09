@@ -171,6 +171,22 @@ def _hull_mask(mask: np.ndarray) -> np.ndarray:
     return out.astype(bool)
 
 
+def _rect_grabcut(small: np.ndarray, band: np.ndarray) -> np.ndarray:
+    """Object seed for low-contrast photos: GrabCut from a centred rectangle."""
+    sh, sw = small.shape[:2]
+    gc = np.zeros((sh, sw), np.uint8)
+    rect = (int(sw * 0.06), int(sh * 0.06), int(sw * 0.88), int(sh * 0.88))
+    try:
+        cv2.grabCut(small, gc, rect, np.zeros((1, 65)), np.zeros((1, 65)), 5, cv2.GC_INIT_WITH_RECT)
+    except cv2.error:
+        out = np.zeros((sh, sw), bool)
+        out[int(sh * 0.3):int(sh * 0.7), int(sw * 0.3):int(sw * 0.7)] = True
+        return out
+    fg = (gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)
+    fg = _largest_components(fg, 0.1)
+    return cv2.erode(fg.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & ~band
+
+
 def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = None) -> Segmentation:
     rgb = img.rgb
     h, w = rgb.shape[:2]
@@ -222,10 +238,8 @@ def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = 
         keep[1:] = st_c[1:, cv2.CC_STAT_AREA] > 0.0015 * sh * sw
         sure_fg = keep[lab_c]
     if sure_fg.sum() < 0.002 * sh * sw:
-        y0, x0 = int(sh * 0.3), int(sw * 0.3)
-        sure_fg = np.zeros((sh, sw), bool)
-        sure_fg[y0:sh - y0, x0:sw - x0] = True
-        notes.append("Weak foreground cues; assumed the object sits in the centre of the frame.")
+        sure_fg = _rect_grabcut(small, band)
+        notes.append("Low colour contrast with the background; the object was separated with a centred graph cut.")
     barrier = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1) > 0
     floor_ab = lab[bottom][:, 1:]
     ab_med = np.median(floor_ab, axis=0)
@@ -244,7 +258,7 @@ def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = 
     n_f, lab_f, _, _ = cv2.connectedComponentsWithStats(passable, connectivity=4)
     bl = np.unique(np.concatenate([lab_f[0], lab_f[-1], lab_f[:, 0], lab_f[:, -1]]))
     flood = np.isin(lab_f, bl[bl > 0])
-    sure_bg = (flood & ~hull_d) | (band & (dist < thr)) | (floor & ~hull_d)
+    sure_bg = (flood & ~hull_d) | (band & (dist < thr)) | (floor & ~cv2.dilate(sure_fg.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool))
     if plain:
         sure_bg |= (dist < thr * 0.5) & ~hull
     zones = np.ones((sh, sw), np.uint8)

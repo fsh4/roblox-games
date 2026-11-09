@@ -68,11 +68,15 @@ Restore = new version with an old version's settings (non-destructive).
 ## Reconstruction (engine/reconstruction.py, engine/fitting.py)
 
 ### Strategy selection
-`rank_categories` scores categories from the features; the top five
-templates are fitted coarsely and compared. A template is used if its fit
-score is below 1.3; otherwise a mirror-symmetric silhouette (> 0.9) selects
-revolution, a drawing-like image selects extrusion, anything else inflation.
-The user can force a category or mode, and can re-analyse later.
+`rank_categories` scores categories from the features; the six best
+templates are fitted coarsely. The two best coarse fits plus the best
+feature-ranked template (or the third coarse fit) are refined with up to 170
+evaluations each, and the lowest refined score wins if it is below
+`TEMPLATE_ACCEPT_SCORE` (1.12). Otherwise a mirror-symmetric silhouette
+(> 0.9) selects revolution, a drawing-like image selects extrusion, anything
+else inflation. Every tested template and its score is written to the
+reconstruction notes. The user can force a category or mode, and can
+re-analyse later.
 
 ### Template fitting (analysis-by-synthesis)
 A hypothesis is (template parameters, azimuth, elevation, field of view, 2D
@@ -116,14 +120,23 @@ largest visible flat face is perspective-rectified into an exemplar patch.
 - **Revolve**: per-row radius around the symmetry axis, smoothed, revolved.
 - **Extrude**: outer contour and holes, Douglas-Peucker simplification (LOD
   controlled), ear-cut caps, mitred bevel ring.
-- **Inflate**: distance transform of the silhouette, thickness
-  `sqrt(d/dmax) * depth/2`, voxelised, marching cubes, Taubin smoothing.
-- **Visual hull**: voxel carving with orthographic front/side/back/left/top
-  silhouettes.
+- **Inflate**: signed Euclidean distance of the silhouette, half thickness
+  `sqrt(d/dmax) * depth/2`; the volume is stored as a continuous field
+  (`half_thickness - |z|` inside, distance outside), not as voxels.
+- **Visual hull**: every orthographic view (front/side/back/left/top)
+  contributes its silhouette's signed distance, low-pass filtered to the voxel
+  spacing and scaled to studs; the hull is the minimum over views.
 - **Turntable**: SIFT features, ratio test, essential matrix (RANSAC) and
   `recoverPose` between consecutive photos give the yaw steps; cameras are
-  placed on a circle and silhouettes vote on a voxel grid. If fewer than half
-  of the pairs match, the job falls back to single-image mode and says why.
+  placed on a circle. Each voxel takes the k-th largest signed distance over
+  views (k = views - 1), the continuous form of "inside all but one
+  silhouette". If fewer than half of the pairs match, the job falls back to
+  single-image mode and says why.
+- **Meshing of fields** (inflate, visual hull, turntable): Gaussian
+  smoothing (0.9 voxel), marching cubes at level 0, Taubin smoothing; shading
+  normals come from the field gradient, so neither the voxel grid nor the
+  marching-cubes facets print bands into the baked normal map. After
+  decimation the low mesh takes its shading normals from the dense surface.
 
 ## Procedural modelling (engine/procedural.py, engine/geometry.py)
 
@@ -180,10 +193,14 @@ segments and cushion subdivision; each can also be raised separately.
    material colour.
 5. **Ambient occlusion**: 24-96 orthographic depth maps from Fibonacci-sphere
    directions; occlusion = cosine-weighted visible fraction, with the floor as
-   an occluder for downward directions.
+   an occluder for downward directions. The depth test uses a slope-scaled
+   bias (one depth-map texel per unit of tangent of the incidence angle) and
+   the result is filtered per part in texture space, which removes the
+   depth-map banding on curved surfaces.
 6. **Normal map**: shape detail transferred from the high-detail build of the
-   same parameters (nearest surface samples, converted into the low mesh's
-   tangent frame) blended with material micro-relief from height fields;
+   same parameters (8 nearest surface samples, inverse-distance weighted,
+   converted into the low mesh's tangent frame, then filtered per part in
+   texture space) blended with material micro-relief from height fields;
    OpenGL convention.
 7. **Gutters** are filled with a mask-weighted push-pull pyramid.
 
@@ -202,8 +219,11 @@ only with emitters, AO only when it varies, normal only with relief).
 - **GLB** (`interchange.py`): glTF 2.0, metallic-roughness with packed ORM
   texture, normal and emissive textures, V flipped to glTF's convention.
 - **OBJ/MTL** with PBR extension keys; **STL** binary.
-- **Previews** (`previews.py`): orthographic front/side/back, perspective
-  three-quarter, wireframe with depth-tested edges, 24-frame turntable GIF,
+- **Previews** (`previews.py`): software-rendered with key/fill/hemisphere
+  light and a percentage-closer shadow map (normal offset plus slope-scaled
+  bias, so curved surfaces show no shadow acne); orthographic
+  front/side/back, perspective three-quarter, wireframe with depth-tested
+  edges, 24-frame turntable GIF,
   contact sheet, and a self-contained `viewer.html` (three.js from a pinned CDN
   URL, model embedded as base64).
 - **Packaging** (`packaging.py`): fixed folder layout, metadata JSON, material
