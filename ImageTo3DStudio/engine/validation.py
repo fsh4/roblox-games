@@ -84,12 +84,68 @@ def inspect_mesh(mesh: Mesh) -> MeshReport:
                       mesh.signed_volume(), nan, uv_bad, flips)
 
 
+def flip_slivers(vertices: np.ndarray, faces: np.ndarray) -> Tuple[np.ndarray, int]:
+    """Remove zero-area triangles with three distinct, collinear corners by edge flips.
+
+    Deleting such a triangle would leave a T-junction (open edges). Instead its
+    longest edge is flipped with the neighbouring triangle across that edge,
+    which keeps the surface closed and leaves two proper triangles.
+    """
+    f = faces.copy()
+    flipped = 0
+
+    def area(t):
+        a, b, c = vertices[t[0]], vertices[t[1]], vertices[t[2]]
+        return 0.5 * np.linalg.norm(np.cross(b - a, c - a))
+
+    for _ in range(4):
+        tri = vertices[f]
+        areas = 0.5 * np.linalg.norm(np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]), axis=1)
+        distinct = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
+        bad = np.flatnonzero((areas <= 1e-12) & distinct)
+        if not len(bad):
+            break
+        edge_face = {}
+        for fi, (a, b, c) in enumerate(f.tolist()):
+            edge_face[(a, b)] = fi
+            edge_face[(b, c)] = fi
+            edge_face[(c, a)] = fi
+        progress = False
+        for fi in bad.tolist():
+            a, b, c = f[fi].tolist()
+            corners = [(a, b, c), (b, c, a), (c, a, b)]
+            p, q, r = max(corners, key=lambda t: float(np.linalg.norm(vertices[t[1]] - vertices[t[0]])))
+            g = edge_face.get((q, p))
+            if g is None or g == fi:
+                continue
+            s = next((v for v in f[g].tolist() if v not in (p, q)), None)
+            if s is None or s == r or (r, s) in edge_face or (s, r) in edge_face:
+                continue
+            t1, t2 = (p, s, r), (s, q, r)
+            if area(t1) <= 1e-12 or area(t2) <= 1e-12:
+                continue
+            for e in ((p, q), (q, r), (r, p), (q, p), (p, s), (s, q)):
+                edge_face.pop(e, None)
+            f[fi], f[g] = t1, t2
+            for e in ((p, s), (s, r), (r, p)):
+                edge_face[e] = fi
+            for e in ((s, q), (q, r), (r, s)):
+                edge_face[e] = g
+            flipped += 1
+            progress = True
+        if not progress:
+            break
+    return f, flipped
+
+
 def repair_mesh(mesh: Mesh) -> Tuple[Mesh, List[str]]:
     notes = []
     out = mesh.copy()
-    keep = out.face_areas() > 1e-12
+    out.faces, flipped = flip_slivers(out.vertices, out.faces)
+    if flipped:
+        notes.append(f"{mesh.name}: flipped {flipped} zero-area sliver triangles")
     f = out.faces
-    keep &= (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
+    keep = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
     if (~keep).any():
         notes.append(f"{mesh.name}: removed {int((~keep).sum())} degenerate triangles")
         out.faces = out.faces[keep]

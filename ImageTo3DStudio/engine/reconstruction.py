@@ -550,7 +550,7 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
         span_u = dims[0] if lbl in ("front", "back", "top") else dims[2]
         span_v = dims[2] if lbl == "top" else dims[1]
         studs_per_px = 0.5 * (span_u / bw + span_v / bh)
-        sdf = _silhouette_sdf(s.seg.filled, grow_px=1.0, smooth_px=0.5 * step / studs_per_px)
+        sdf = _silhouette_sdf(carving_silhouette(s), grow_px=1.0, smooth_px=0.5 * step / studs_per_px)
         np.minimum(field_vol, _sample_field(sdf, u, v) * studs_per_px, out=field_vol)
         cams.append({"label": lbl, "bbox": [int(x0), int(y0), int(x1), int(y1)], "path_index": sources.index(s)})
     occ = field_vol > 0
@@ -566,6 +566,33 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
         "photo_projection": True,
     }
     return Reconstruction(spec, {"occupancy": occ.astype(np.uint8), "field": _store_field(field_vol, step)})
+
+
+def carving_silhouette(src: Source) -> np.ndarray:
+    """Silhouette for carving: holes filled, except gaps that show the background.
+
+    Gaps between chair-back slats or inside a mug handle stay open when the
+    pixels in them match the background colour model; other interior holes
+    (highlights, object colours close to the background) are filled, because a
+    false hole would carve a tunnel through every other view.
+    """
+    seg = src.seg
+    sil = seg.filled.copy()
+    holes = seg.filled & ~seg.mask
+    if not holes.any() or not len(seg.background_lab):
+        return sil
+    lab = cv2.cvtColor(src.image.rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    wts = np.array([0.55, 1.0, 1.0], np.float32)
+    count, labels = cv2.connectedComponents(holes.astype(np.uint8))
+    min_area = 0.002 * float(seg.filled.sum())
+    for i in range(1, count):
+        region = labels == i
+        if region.sum() < min_area:
+            continue
+        d = np.min(np.linalg.norm((lab[region][:, None, :] - seg.background_lab[None]) * wts, axis=2), axis=1)
+        if np.median(d) < 5.0:
+            sil &= ~region
+    return sil
 
 
 def _silhouette_sdf(mask: np.ndarray, grow_px: float = 0.0, smooth_px: float = 0.0) -> np.ndarray:
@@ -674,7 +701,7 @@ def _turntable_cameras(sources: Sequence[Source], angles: Sequence[float], heigh
 def _small_masks(sources: Sequence[Source], side: int = 200) -> List[Tuple[np.ndarray, float]]:
     out = []
     for s in sources:
-        m = s.seg.filled.astype(np.float32)
+        m = carving_silhouette(s).astype(np.float32)
         k = side / max(m.shape)
         small = cv2.resize(m, (max(1, round(m.shape[1] * k)), max(1, round(m.shape[0] * k))), interpolation=cv2.INTER_AREA) > 0.3
         out.append((small, k))
@@ -797,7 +824,7 @@ def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolu
         xy, _, _ = cam.project(pts)
         xy = xy + shift
         inside = (xy[:, 0] >= 0) & (xy[:, 0] < w) & (xy[:, 1] >= 0) & (xy[:, 1] < h)
-        sdf = _silhouette_sdf(s.seg.filled, grow_px=2.0, smooth_px=0.5 * step / studs_per_px)
+        sdf = _silhouette_sdf(carving_silhouette(s), grow_px=2.0, smooth_px=0.5 * step / studs_per_px)
         fields[i] = np.where(inside, _sample_field(sdf, xy[:, 0], xy[:, 1]) * studs_per_px, -8 * step)
         cams.append({"azimuth": float(ang), "elevation": float(elevation), "distance": float(dist), "shift": shift.tolist(), "path_index": sources.index(s)})
     need = min(max(len(sources) - 1, 2), len(sources))

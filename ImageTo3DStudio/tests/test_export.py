@@ -150,3 +150,10 @@ def test_export_conversion_from_package(tmp_path, bed_version):
     assert any(n.endswith("model.obj") for n in zipfile.ZipFile(obj_zip).namelist())
     with pytest.raises(ValueError):
         convert.export_format(res.package_dir, "exe", str(out))
+
+
+def test_rbxmx_floats_match_binary_float32():
+    rng = np.random.default_rng(3)
+    values = np.concatenate([rng.uniform(-50, 50, 5000), rng.uniform(-1, 1, 5000) * 1e-3, [5.18068079, 0.1, 1 / 3]])
+    for v in values:
+        assert np.float32(float(rbxm._f32(v))) == np.float32(v)

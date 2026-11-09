@@ -572,6 +572,54 @@ def _offset_ring(ring: np.ndarray, distance: float) -> np.ndarray:
     return ring + bis * (distance / cosang)
 
 
+def _degenerate_vertices(ring: np.ndarray, tol: float) -> np.ndarray:
+    """Vertices that duplicate their predecessor or lie on the line through their neighbours."""
+    prev = np.roll(ring, 1, axis=0)
+    nxt = np.roll(ring, -1, axis=0)
+    cross = np.abs((ring[:, 0] - prev[:, 0]) * (nxt[:, 1] - prev[:, 1]) - (ring[:, 1] - prev[:, 1]) * (nxt[:, 0] - prev[:, 0]))
+    dist = cross / np.maximum(np.linalg.norm(nxt - prev, axis=1), EPS)
+    return (dist < tol) | (np.linalg.norm(ring - prev, axis=1) < tol)
+
+
+def _clean_ring(ring: np.ndarray, tol: float, inset: float = 0.0) -> np.ndarray:
+    """Drop vertices the ear-cutter would discard, in the ring and in its mitred inset.
+
+    Ear clipping silently removes collinear and repeated points; the side wall
+    would still use them, leaving T-junctions (open edges) along the caps.
+    """
+    r = np.asarray(ring, dtype=np.float64)
+    for _ in range(len(r)):
+        if len(r) <= 3:
+            break
+        bad = _degenerate_vertices(r, tol)
+        if inset > EPS:
+            bad |= _degenerate_vertices(_offset_ring(r, inset), tol)
+        if not bad.any():
+            break
+        bad &= ~np.roll(bad, 1)
+        r = r[~bad]
+    return r
+
+
+def _rings_cross(rings: Sequence[np.ndarray]) -> bool:
+    """True if any two edges of the rings properly intersect (self or mutual)."""
+    p = np.concatenate([r for r in rings])
+    q = np.concatenate([np.roll(r, -1, axis=0) for r in rings])
+
+    def orient(a, b, c):
+        return (b[..., 0] - a[..., 0]) * (c[..., 1] - a[..., 1]) - (b[..., 1] - a[..., 1]) * (c[..., 0] - a[..., 0])
+
+    for start in range(0, len(p), 512):
+        pa, qa = p[start:start + 512, None], q[start:start + 512, None]
+        o1 = orient(pa, qa, p[None])
+        o2 = orient(pa, qa, q[None])
+        o3 = orient(p[None], q[None], pa)
+        o4 = orient(p[None], q[None], qa)
+        if np.any((o1 * o2 < 0) & (o3 * o4 < 0)):
+            return True
+    return False
+
+
 def extrude_polygon(
     outer: np.ndarray,
     holes: Sequence[np.ndarray] = (),
@@ -582,14 +630,27 @@ def extrude_polygon(
     """Extrude a polygon in the XY plane symmetrically along Z (front face at -Z).
 
     A small ``bevel`` produces a chamfer ring on both sides using a mitered inset,
-    which keeps vertex correspondence so the wall stays watertight.
+    which keeps vertex correspondence so the wall stays watertight. Where the
+    inset would fold over itself (thin spikes, short edges) the bevel is
+    halved, and dropped after three tries.
     """
     outer = _ensure_ccw(np.asarray(outer, dtype=np.float64), True)
-    holes = [_ensure_ccw(np.asarray(h, dtype=np.float64), False) for h in holes]
+    holes = [_ensure_ccw(np.asarray(h, dtype=np.float64), False) for h in holes if len(h) >= 3]
     half = depth / 2.0
+    tol = 1e-6 * max(float(np.ptp(outer, axis=0).max()), 1e-3)
     b = float(min(bevel, half * 0.8))
-    rings = [outer] + holes
-    inset_rings = [_offset_ring(r, b) for r in rings] if b > EPS else rings
+    for _ in range(4):
+        rings = [_clean_ring(r, tol, b) for r in [outer] + holes]
+        rings = [rings[0]] + [h for h in rings[1:] if len(h) >= 3]
+        inset_rings = [_offset_ring(r, b) for r in rings] if b > EPS else rings
+        if b <= EPS or not _rings_cross(inset_rings):
+            break
+        b *= 0.5
+    else:
+        b = 0.0
+        rings = [_clean_ring(r, tol) for r in [outer] + holes]
+        rings = [rings[0]] + [h for h in rings[1:] if len(h) >= 3]
+        inset_rings = rings
     cap_pts, cap_tris = triangulate_polygon(inset_rings[0], inset_rings[1:])
     meshes = []
     for z, sign in ((-half, -1.0), (half, 1.0)):

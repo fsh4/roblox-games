@@ -227,11 +227,16 @@ def write_rbxm(path: str, root: Instance) -> dict:
 # XML
 # ---------------------------------------------------------------------------
 
+def _f32(v: float) -> str:
+    """Shortest text that parses back to the same float32 the binary file stores."""
+    return f"{float(np.float32(v)):.9g}"
+
+
 def _xml_cframe(tag: str, name: Optional[str], cf: np.ndarray, indent: str) -> str:
     r = cf[:3, :3]
     p = cf[:3, 3]
     comps = [("X", p[0]), ("Y", p[1]), ("Z", p[2])] + [(f"R{i}{j}", r[i, j]) for i in range(3) for j in range(3)]
-    inner = "".join(f"<{k}>{float(v):.9g}</{k}>" for k, v in comps)
+    inner = "".join(f"<{k}>{_f32(v)}</{k}>" for k, v in comps)
     attr = f' name="{name}"' if name else ""
     return f"{indent}<{tag}{attr}>{inner}</{tag}>\n"
 
@@ -242,12 +247,12 @@ def _xml_prop(pname: str, kind: str, value: Any, indent: str) -> str:
     if kind == "bool":
         return f'{indent}<bool name="{pname}">{"true" if value else "false"}</bool>\n'
     if kind == "float":
-        return f'{indent}<float name="{pname}">{float(value):.9g}</float>\n'
+        return f'{indent}<float name="{pname}">{_f32(value)}</float>\n'
     if kind == "Enum":
         return f'{indent}<token name="{pname}">{int(value)}</token>\n'
     if kind == "Vector3":
         x, y, z = value
-        return f'{indent}<Vector3 name="{pname}"><X>{x:.9g}</X><Y>{y:.9g}</Y><Z>{z:.9g}</Z></Vector3>\n'
+        return f'{indent}<Vector3 name="{pname}"><X>{_f32(x)}</X><Y>{_f32(y)}</Y><Z>{_f32(z)}</Z></Vector3>\n'
     if kind == "Color3uint8":
         r, g, b = value
         packed = (0xFF << 24) | (r << 16) | (g << 8) | b
