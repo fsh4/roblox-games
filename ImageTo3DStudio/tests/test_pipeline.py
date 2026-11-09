@@ -98,6 +98,23 @@ def test_multi_view_visual_hull(tmp_path):
     assert size[0] > size[2] * 0.9, "the handle makes the mug wider than deep"
 
 
+def test_photo_set_recovers_camera_steps(tmp_path):
+    names = [f"chair_turn_{k:02d}.jpg" for k in range(8)]
+    srcs = [image(n) for n in names]
+    (tmp_path / "source").mkdir()
+    for s in srcs:
+        shutil.copy(s, tmp_path / "source" / s.name)
+    spec = pipeline.analyse_project(str(tmp_path), [str(tmp_path / "source" / n) for n in names], mode="multi")
+    assert spec["strategy"] == "turntable"
+    steps = np.diff([v["azimuth"] for v in spec["views"]])
+    assert np.all(np.abs(np.abs(steps) - 45.0) < 3.0), "the photos were taken every 45 degrees"
+    assert abs(spec["views"][0]["elevation"] - 14.0) <= 6.0
+    spec, arrays = pipeline.load_spec(str(tmp_path))
+    res = pipeline.build_version(str(tmp_path), str(tmp_path / "v1"), spec, arrays, BuildSettings(triangle_budget=4000, texture_resolution=256, quality="draft"), "Chair", "abcd1234", 1)
+    assert res.stats["triangles"] <= 4000
+    assert res.stats["size_studs"][1] > 0.85 * 6.0, "the thin chair legs must survive carving and meshing"
+
+
 def test_large_image_is_downscaled(tmp_path):
     big = tmp_path / "big.jpg"
     Image.new("RGB", (6000, 4000), (200, 200, 200)).save(big, quality=60)

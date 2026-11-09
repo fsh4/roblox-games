@@ -595,18 +595,21 @@ def _intrinsics(img: an.LoadedImage) -> np.ndarray:
     return np.array([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1]], dtype=np.float64)
 
 
-def estimate_turntable(sources: Sequence[Source]) -> Tuple[List[float], List[str]]:
-    """Recover relative yaw between consecutive photos with SIFT + essential matrix."""
+TURNTABLE_ELEVATION = 10.0
+_ELEVATIONS = (0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0)
+
+
+def _sift_yaws(sources: Sequence[Source]) -> Tuple[List[Optional[float]], int, List[str]]:
+    """Signed yaw between consecutive photos from SIFT matches and the essential matrix."""
     notes = []
     sift = cv2.SIFT_create(nfeatures=4000)
     feats = []
     for s in sources:
         gray = cv2.cvtColor(s.image.rgb, cv2.COLOR_RGB2GRAY)
         m = cv2.dilate(s.seg.filled.astype(np.uint8) * 255, np.ones((25, 25), np.uint8))
-        kp, des = sift.detectAndCompute(gray, m)
-        feats.append((kp, des))
+        feats.append(sift.detectAndCompute(gray, m))
     matcher = cv2.BFMatcher(cv2.NORM_L2)
-    yaws = []
+    yaws: List[Optional[float]] = []
     ok = 0
     for i in range(len(sources) - 1):
         kp1, d1 = feats[i]
@@ -625,7 +628,7 @@ def estimate_turntable(sources: Sequence[Source]) -> Tuple[List[float], List[str
         if E is None or inl is None or inl.sum() < 20:
             yaws.append(None)
             continue
-        _, R, t, _ = cv2.recoverPose(E[:3], p1, p2, K, mask=inl)
+        _, R, _, _ = cv2.recoverPose(E[:3], p1, p2, K, mask=inl)
         rvec, _ = cv2.Rodrigues(R)
         angle = float(np.degrees(np.linalg.norm(rvec)))
         axis = rvec.ravel() / max(np.linalg.norm(rvec), 1e-9)
@@ -633,23 +636,142 @@ def estimate_turntable(sources: Sequence[Source]) -> Tuple[List[float], List[str
             notes.append(f"Pair {i + 1}-{i + 2}: rotation axis is not vertical; the object may not have been circled.")
         yaws.append(angle * (1 if axis[1] >= 0 else -1))
         ok += 1
-    if ok < max(1, (len(sources) - 1) * 0.5):
-        raise ReconstructionError(f"only {ok} of {len(sources) - 1} photo pairs could be matched; the photo set lacks overlap or texture")
-    valid = [abs(y) for y in yaws if y is not None]
-    mean_step = float(np.median(valid))
-    angles = [0.0]
-    for y in yaws:
-        angles.append(angles[-1] + (abs(y) if y is not None else mean_step))
-    notes.append(f"Recovered yaw steps: {', '.join('?' if y is None else f'{abs(y):.0f}' for y in yaws)} degrees.")
-    return angles, notes
+    return yaws, ok, notes
 
 
-def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolution: int = 96) -> Reconstruction:
-    angles, notes = estimate_turntable(sources)
-    first = sources[0]
-    x0, y0, x1, y1 = first.features.bbox
-    aspect = (x1 - x0 + 1) / max(y1 - y0 + 1, 1)
-    half = max(aspect, 1.0) * height_studs * 0.6
+def _turntable_extent(sources: Sequence[Source], height_studs: float) -> float:
+    """Half width of the carving volume: wide enough for the widest silhouette."""
+    aspect = max((s.features.bbox[2] - s.features.bbox[0] + 1) / max(s.features.bbox[3] - s.features.bbox[1] + 1, 1) for s in sources)
+    return max(aspect, 1.0) * height_studs * 0.6
+
+
+def _turntable_cameras(sources: Sequence[Source], angles: Sequence[float], height_studs: float, elevation: float):
+    """Camera, image shift, distance and studs-per-pixel for each photo on the assumed circle."""
+    out = []
+    for s, ang in zip(sources, angles):
+        h, w = s.image.rgb.shape[:2]
+        K = _intrinsics(s.image)
+        bx0, by0, bx1, by1 = s.features.bbox
+        obj_h_px = max(by1 - by0 + 1, 1)
+        dist = K[0, 0] * height_studs / obj_h_px
+        cam = render.orbit_camera((0, height_studs / 2, 0), dist, ang, elevation, w, h, 2 * np.degrees(np.arctan(h / 2 / K[1, 1])))
+        shift = np.array([(bx0 + bx1) / 2 - w / 2, (by0 + by1) / 2 - h / 2])
+        out.append((cam, shift, dist, height_studs / obj_h_px))
+    return out
+
+
+def _small_masks(sources: Sequence[Source], side: int = 200) -> List[Tuple[np.ndarray, float]]:
+    out = []
+    for s in sources:
+        m = s.seg.filled.astype(np.float32)
+        k = side / max(m.shape)
+        small = cv2.resize(m, (max(1, round(m.shape[1] * k)), max(1, round(m.shape[0] * k))), interpolation=cv2.INTER_AREA) > 0.3
+        out.append((small, k))
+    return out
+
+
+def silhouette_coherence(sources: Sequence[Source], angles: Sequence[float], height_studs: float, elevation: float,
+                         masks: Optional[List[Tuple[np.ndarray, float]]] = None, res: int = 36) -> float:
+    """Mean IoU between every silhouette and the reprojection of all silhouettes' intersection.
+
+    With the right camera angles the carved volume explains each photo's
+    outline; wrong angles carve parts away (Hernandez, Schmitt and Cipolla 2007,
+    silhouette coherence under circular motion).
+    """
+    masks = masks or _small_masks(sources)
+    half = _turntable_extent(sources, height_studs)
+    g1 = np.linspace(-half, half, res)
+    gy = np.linspace(0.0, height_studs * 1.05, res)
+    X, Y, Z = np.meshgrid(g1, gy, g1, indexing="ij")
+    pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
+    step = float(g1[1] - g1[0])
+    inside = np.ones(len(pts), bool)
+    projected = []
+    for (cam, shift, _, spp), (m, k) in zip(_turntable_cameras(sources, angles, height_studs, elevation), masks):
+        xy, _, _ = cam.project(pts)
+        xy = (xy + shift) * k
+        xi = np.floor(xy[:, 0]).astype(np.int64)
+        yi = np.floor(xy[:, 1]).astype(np.int64)
+        inb = (xi >= 0) & (xi < m.shape[1]) & (yi >= 0) & (yi < m.shape[0])
+        foot = max(1, int(np.ceil(step / spp * k)))
+        grown = cv2.dilate(m.astype(np.uint8), np.ones((foot, foot), np.uint8)) > 0
+        hit = np.zeros(len(pts), bool)
+        hit[inb] = grown[yi[inb], xi[inb]]
+        inside &= hit
+        projected.append((xi, yi, inb, m, foot))
+    if inside.sum() < 20:
+        return 0.0
+    scores = []
+    for xi, yi, inb, m, foot in projected:
+        sel = inside & inb
+        img = np.zeros(m.shape, np.uint8)
+        img[yi[sel], xi[sel]] = 1
+        img = cv2.dilate(img, np.ones((foot + 1, foot + 1), np.uint8)) > 0
+        scores.append(np.count_nonzero(img & m) / max(np.count_nonzero(img | m), 1))
+    return float(np.mean(scores))
+
+
+def _best_elevation(sources, angles, height_studs, masks) -> Tuple[float, float]:
+    scored = [(silhouette_coherence(sources, angles, height_studs, el, masks), el) for el in _ELEVATIONS]
+    c, el = max(scored)
+    return c, el
+
+
+def _coherent_step(sources: Sequence[Source], height_studs: float, masks) -> Tuple[float, float, float]:
+    """Constant yaw step (signed) and elevation that maximise silhouette coherence."""
+    n = len(sources)
+    best = (-1.0, 0.0)
+    for sign in (1.0, -1.0):
+        for d in np.arange(10.0, 120.01, 2.5):
+            c = silhouette_coherence(sources, [sign * d * k for k in range(n)], height_studs, TURNTABLE_ELEVATION, masks)
+            if c > best[0] + 1e-9:
+                best = (c, sign * d)
+    step = best[1]
+    c, el = _best_elevation(sources, [step * k for k in range(n)], height_studs, masks)
+    sign = 1.0 if step >= 0 else -1.0
+    for d in np.arange(abs(step) - 2.0, abs(step) + 2.01, 0.5):
+        cd = silhouette_coherence(sources, [sign * d * k for k in range(n)], height_studs, el, masks)
+        if cd > c + 1e-9:
+            c, step = cd, sign * d
+    return c, step, el
+
+
+def estimate_turntable(sources: Sequence[Source], height_studs: float = 6.0) -> Tuple[List[float], List[str], float]:
+    """Camera azimuths and elevation for photos taken around the object.
+
+    Image features first: SIFT matches and the essential matrix give the yaw
+    between consecutive photos. When the object has too little texture for
+    that, equal steps are assumed and the step and elevation that make the
+    silhouettes most coherent are chosen.
+    """
+    n = len(sources)
+    yaws, ok, notes = _sift_yaws(sources)
+    masks = _small_masks(sources)
+    if ok >= max(1, (n - 1) * 0.5):
+        valid = [abs(y) for y in yaws if y is not None]
+        mean_step = float(np.median(valid))
+        steps = [abs(y) if y is not None else mean_step for y in yaws]
+        candidates = []
+        for sign in (1.0, -1.0):
+            angles = [0.0]
+            for st in steps:
+                angles.append(angles[-1] + sign * st)
+            c, el = _best_elevation(sources, angles, height_studs, masks)
+            candidates.append((c, el, angles))
+        c, el, angles = max(candidates, key=lambda t: t[0])
+        notes.append(f"Recovered yaw steps: {', '.join('?' if y is None else f'{abs(y):.0f}' for y in yaws)} degrees; elevation {el:.0f} degrees (silhouette agreement {c:.0%}).")
+        return angles, notes, el
+    c, step, el = _coherent_step(sources, height_studs, masks)
+    if c < 0.55:
+        raise ReconstructionError(f"only {ok} of {n - 1} photo pairs could be matched and no constant camera step explains the silhouettes (best agreement {c:.0%})")
+    notes.append(f"Image features matched {ok} of {n - 1} photo pairs (too little texture), so equal camera steps were assumed: "
+                 f"silhouette coherence chose {abs(step):.1f} degrees per photo at {el:.0f} degrees elevation (silhouette agreement {c:.0%}).")
+    return [float(step * k) + 0.0 for k in range(n)], notes, el
+
+
+def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolution: int = 128) -> Reconstruction:
+    angles, notes, elevation = estimate_turntable(sources, height_studs)
+    half = _turntable_extent(sources, height_studs)
     n = resolution
     step = 2 * half / (n - 1)
     gx = np.linspace(-half, half, n)
@@ -659,21 +781,14 @@ def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolu
     pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
     fields = np.empty((len(sources), len(pts)), np.float32)
     cams = []
-    for i, (s, ang) in enumerate(zip(sources, angles)):
+    for i, (s, ang, (cam, shift, dist, studs_per_px)) in enumerate(zip(sources, angles, _turntable_cameras(sources, angles, height_studs, elevation))):
         h, w = s.image.rgb.shape[:2]
-        K = _intrinsics(s.image)
-        bx0, by0, bx1, by1 = s.features.bbox
-        obj_h_px = by1 - by0 + 1
-        dist = K[0, 0] * height_studs / max(obj_h_px, 1)
-        cam = render.orbit_camera((0, height_studs / 2, 0), dist, ang, 10.0, w, h, 2 * np.degrees(np.arctan(h / 2 / K[1, 1])))
         xy, _, _ = cam.project(pts)
-        shift = np.array([(bx0 + bx1) / 2 - w / 2, (by0 + by1) / 2 - h / 2])
         xy = xy + shift
         inside = (xy[:, 0] >= 0) & (xy[:, 0] < w) & (xy[:, 1] >= 0) & (xy[:, 1] < h)
-        studs_per_px = height_studs / max(obj_h_px, 1)
         sdf = _silhouette_sdf(s.seg.filled, grow_px=2.0, smooth_px=0.5 * step / studs_per_px)
         fields[i] = np.where(inside, _sample_field(sdf, xy[:, 0], xy[:, 1]) * studs_per_px, -8 * step)
-        cams.append({"azimuth": float(ang), "distance": float(dist), "shift": shift.tolist(), "path_index": sources.index(s)})
+        cams.append({"azimuth": float(ang), "elevation": float(elevation), "distance": float(dist), "shift": shift.tolist(), "path_index": sources.index(s)})
     need = min(max(len(sources) - 1, 2), len(sources))
     field_vol = np.sort(fields, axis=0)[-need].reshape(X.shape)
     del fields
@@ -852,7 +967,7 @@ def _inflate_volume(mask: np.ndarray, dims, depth: float, res: int) -> Tuple[np.
     return vol, origin, step
 
 
-def _field_mesh(field_vol: np.ndarray, origin, step: float, smooth_iters: int = 10) -> g.Mesh:
+def _field_mesh(field_vol: np.ndarray, origin, step: float, smooth_iters: int = 10, smoothing: float = 0.9) -> g.Mesh:
     """Iso-surface of a continuous inside-positive field (sub-voxel accurate, no voxel steps)."""
     from scipy.ndimage import gaussian_filter
     from skimage.measure import marching_cubes
@@ -861,7 +976,7 @@ def _field_mesh(field_vol: np.ndarray, origin, step: float, smooth_iters: int = 
 
     f = np.asarray(field_vol, dtype=np.float32)
     outside = float(min(f.min(), 0.0)) - step
-    vol = gaussian_filter(np.pad(f, 2, constant_values=outside), 0.9)
+    vol = gaussian_filter(np.pad(f, 2, constant_values=outside), smoothing)
     verts, faces, _, _ = marching_cubes(vol, 0.0)
     origin = np.asarray(origin, dtype=np.float64)
     mesh = g.Mesh((verts.astype(np.float64) - 2.0) * step + origin, faces.astype(np.int64))
@@ -923,13 +1038,16 @@ def build_generic_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> 
         mesh = _field_mesh(fld, origin, step)
         parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(fld > 0, origin, step, "surface"))]
     elif strategy in ("visual_hull", "turntable"):
-        factor = 1 if lod.q > 0.6 else 2
-        step = spec["voxel_step"] * factor
         if "field" in arrays:
-            fld = np.asarray(arrays["field"], dtype=np.float32)[::factor, ::factor, ::factor]
-            mesh = _field_mesh(fld, spec["grid_origin"], step)
+            # Full grid at every level of detail: thin parts (chair legs) are only
+            # a few voxels wide, and decimation sets the triangle count anyway.
+            step = spec["voxel_step"]
+            fld = np.asarray(arrays["field"], dtype=np.float32)
+            mesh = _field_mesh(fld, spec["grid_origin"], step, smoothing=0.9 if strategy == "visual_hull" else 0.6)
             occ = fld > 0
         else:
+            factor = 1 if lod.q > 0.6 else 2
+            step = spec["voxel_step"] * factor
             occ = (np.asarray(arrays["occupancy"]) > 0)[::factor, ::factor, ::factor]
             mesh = _voxel_mesh(occ, spec["grid_origin"], step, 6)
         parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(occ, spec["grid_origin"], step, "surface"))]
@@ -1064,7 +1182,7 @@ def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene) ->
             h, w = s.image.rgb.shape[:2]
             K = _intrinsics(s.image)
             fov = 2 * np.degrees(np.arctan(h / 2 / K[1, 1]))
-            cam = render.orbit_camera((0, spec["dimensions"][1] / 2 / 1.05, 0), cam_spec["distance"], cam_spec["azimuth"], 10.0, w, h, fov)
+            cam = render.orbit_camera((0, spec["dimensions"][1] / 2 / 1.05, 0), cam_spec["distance"], cam_spec["azimuth"], cam_spec.get("elevation", TURNTABLE_ELEVATION), w, h, fov)
             cam.cx = w / 2 + cam_spec["shift"][0]
             cam.cy = h / 2 + cam_spec["shift"][1]
             img = srgb_to_linear(s.image.rgb.astype(np.float64) / 255.0)

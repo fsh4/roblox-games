@@ -38,6 +38,7 @@ CASES = [
     {"name": "Vase", "images": ["vase_render.png"], "category": "revolve", "triangles": 3000, "texture": 512, "note": "synthetic Cycles render"},
     {"name": "Plush", "images": ["plush_render.png"], "category": "inflate", "triangles": 5000, "texture": 512, "note": "synthetic render, PNG with alpha"},
     {"name": "Mug", "images": ["mug_front.png", "mug_side.png", "mug_back.png", "mug_top.png"], "views": ["front", "side", "back", "top"], "mode": "multi", "triangles": 4000, "texture": 512, "note": "four synthetic orthographic views"},
+    {"name": "ChairScan", "images": [f"chair_turn_{k:02d}.jpg" for k in range(8)], "mode": "multi", "triangles": 4000, "texture": 512, "note": "eight unlabelled synthetic photos taken around the object"},
 ]
 
 
@@ -100,6 +101,17 @@ def silhouette_iou(project_dir: Path, result: dict) -> float:
         ppm = (y1 - y0 + 1) / spec["dimensions"][1]
         center = np.array([0.0, spec["dimensions"][1] / 2, 0.0])
         cam = render.Camera(render.look_at(center + np.array([0, 0, -100]), center), w, h, ortho_scale=ppm, cx=(x0 + x1) / 2, cy=(y0 + y1) / 2)
+    elif spec["strategy"] == "turntable":
+        from engine import analyzer
+        from engine.reconstruction import TURNTABLE_ELEVATION, _intrinsics
+
+        v0 = spec["views"][0]
+        img = analyzer.load_image(str(sorted((project_dir / "source").glob("image_1.*"))[0]))
+        K = _intrinsics(img)
+        fov = 2 * np.degrees(np.arctan(h / 2 / K[1, 1]))
+        cam = render.orbit_camera((0, spec["dimensions"][1] / 2 / 1.05, 0), v0["distance"], v0["azimuth"], v0.get("elevation", TURNTABLE_ELEVATION), w, h, fov)
+        cam.cx = w / 2 + v0["shift"][0]
+        cam.cy = h / 2 + v0["shift"][1]
     else:
         return float("nan")
     xy, z, iw = cam.project(V)
