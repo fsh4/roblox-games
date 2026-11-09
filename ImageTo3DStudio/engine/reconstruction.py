@@ -164,6 +164,7 @@ def _specific_regions(rgb: np.ndarray, regions: Dict[str, np.ndarray], families:
     lab_img = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
     wts = np.array([0.35, 1.0, 1.0], np.float32)
     rng = np.random.default_rng(4)
+    cv2.setRNGSeed(an.RNG_SEED)
     pooled = []
     for reg in regions.values():
         px = lab_img[reg]
@@ -590,8 +591,14 @@ def carving_silhouette(src: Source) -> np.ndarray:
         if region.sum() < min_area:
             continue
         d = np.min(np.linalg.norm((lab[region][:, None, :] - seg.background_lab[None]) * wts, axis=2), axis=1)
-        if np.median(d) < 5.0:
-            sil &= ~region
+        if np.median(d) >= 5.0:
+            continue
+        # Open only the pixels that look like background: thin parts inside the
+        # gap (slats the cut-out missed) keep their own colour and stay solid.
+        see_through = np.zeros_like(region)
+        see_through[region] = d < 8.0
+        see_through = cv2.morphologyEx(see_through.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)) > 0
+        sil &= ~see_through
     return sil
 
 
@@ -767,11 +774,23 @@ def _coherent_step(sources: Sequence[Source], height_studs: float, masks) -> Tup
     step = best[1]
     c, el = _best_elevation(sources, [step * k for k in range(n)], height_studs, masks)
     sign = 1.0 if step >= 0 else -1.0
-    for d in np.arange(abs(step) - 2.0, abs(step) + 2.01, 0.5):
-        cd = silhouette_coherence(sources, [sign * d * k for k in range(n)], height_studs, el, masks)
-        if cd > c + 1e-9:
-            c, step = cd, sign * d
-    return c, step, el
+    # Fine stage on sharper masks. The coherence peak is flat, so the step is the
+    # coherence-weighted centre of everything within 1 % of the best value, which
+    # is steadier than the single best sample.
+    fine = _small_masks(sources, 320)
+    steps = np.arange(abs(step) - 2.0, abs(step) + 2.01, 0.5)
+    scores = np.array([silhouette_coherence(sources, [sign * d * k for k in range(n)], height_studs, el, fine, res=64) for d in steps])
+    near = scores >= scores.max() * 0.99
+    magnitude = float(np.sum(steps[near] * scores[near]) / np.sum(scores[near]))
+    c = float(scores.max())
+    # Photos taken all the way around close the circle: prefer 360/n when it
+    # explains the silhouettes as well as the free estimate.
+    full = 360.0 / n
+    if abs(magnitude - full) <= 0.04 * full:
+        c_full = silhouette_coherence(sources, [sign * full * k for k in range(n)], height_studs, el, fine, res=64)
+        if c_full >= 0.99 * c:
+            magnitude, c = full, max(c, c_full)
+    return c, sign * magnitude, el
 
 
 def estimate_turntable(sources: Sequence[Source], height_studs: float = 6.0) -> Tuple[List[float], List[str], float]:

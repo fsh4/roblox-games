@@ -25,6 +25,8 @@ WORK_MAX_SIDE = 1024
 ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP", "BMP", "TIFF", "GIF"}
 
 
+RNG_SEED = 0x5EED
+
 class ImageValidationError(ValueError):
     pass
 
@@ -188,6 +190,9 @@ def _rect_grabcut(small: np.ndarray, band: np.ndarray) -> np.ndarray:
 
 
 def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = None) -> Segmentation:
+    # Graph cut and k-means draw from OpenCV's global RNG; a fixed seed makes the
+    # cut-out of a photo identical no matter what ran earlier in the process.
+    cv2.setRNGSeed(RNG_SEED)
     rgb = img.rgb
     h, w = rgb.shape[:2]
     notes: List[str] = []
@@ -383,6 +388,7 @@ def line_segments(gray: np.ndarray, min_len: float) -> np.ndarray:
 
 
 def palette(rgb: np.ndarray, mask: np.ndarray, k: int = 5) -> List[Tuple[Tuple[float, float, float], float]]:
+    cv2.setRNGSeed(RNG_SEED)
     px = rgb[mask].astype(np.float32)
     if len(px) < k:
         return [((0.7, 0.7, 0.7), 1.0)]
@@ -471,6 +477,7 @@ def albedo_estimate(px_srgb: np.ndarray, band: Tuple[float, float] = (55.0, 92.0
     are averaged in linear light, which discards cast shadows and specular
     highlights and approximates the lit diffuse colour.
     """
+    cv2.setRNGSeed(RNG_SEED)
     px = np.asarray(px_srgb, dtype=np.float64)
     if len(px) > 40000:
         px = px[np.random.default_rng(1).choice(len(px), 40000, replace=False)]
