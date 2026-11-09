@@ -110,7 +110,11 @@ can open or edit a project.
   flat objects.
 - Several photos: either label them (`views: front,side,back,top`, orthographic-like
   shots) for a visual hull, or walk around the object at a constant height for
-  the photo-set mode.
+  the photo-set mode. Keep the steps between photos about equal (for example 8
+  photos, one every 45 degrees): objects without surface texture are
+  calibrated from their silhouettes under that assumption.
+- A flat drawing or logo (flat colours, outline) is extruded into a solid
+  emblem; holes in it are kept.
 
 ## Importing into Roblox Studio
 

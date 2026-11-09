@@ -71,10 +71,22 @@ Restore = new version with an old version's settings (non-destructive).
 `rank_categories` scores categories from the features; the six best
 templates are fitted coarsely. The two best coarse fits plus the best
 feature-ranked template (or the third coarse fit) are refined with up to 170
-evaluations each, and the lowest refined score wins if it is below
-`TEMPLATE_ACCEPT_SCORE` (1.12). Otherwise a mirror-symmetric silhouette
-(> 0.9) selects revolution, a drawing-like image selects extrusion, anything
-else inflation. Every tested template and its score is written to the
+evaluations each, and the lowest refined score wins if it is below the
+acceptance score:
+
+| Silhouette | Acceptance | Reason |
+|---|---|---|
+| lathe-like: mirror symmetry > 0.9 and > 95 % of rows are one run | 0.80 | a surface of revolution reproduces it exactly |
+| organic: solidity > 0.8 and few straight lines | 0.85 | compact blobs are rarely furniture or vehicles |
+| anything else | 1.12 (`TEMPLATE_ACCEPT_SCORE`) | |
+
+The lamp template is not tried for lathe-like silhouettes (revolve is exact)
+nor for silhouettes with many split rows (a lamp is a lathe shape). Without an
+accepted template: a drawing score above 0.55 selects extrusion, a lathe-like
+silhouette revolution, anything else inflation. The drawing score combines
+the share of perfectly flat pixels (|Laplacian| < 3), the share of the four
+most common colours (4 bits per channel) and a dark outline along the
+silhouette. Every tested template and its score is written to the
 reconstruction notes. The user can force a category or mode, and can
 re-analyse later.
 
@@ -119,13 +131,21 @@ largest visible flat face is perspective-rectified into an exemplar patch.
 ### Generic strategies
 - **Revolve**: per-row radius around the symmetry axis, smoothed, revolved.
 - **Extrude**: outer contour and holes, Douglas-Peucker simplification (LOD
-  controlled), ear-cut caps, mitred bevel ring.
+  controlled), ear-cut caps, mitred bevel ring. Points the ear-cutter would
+  drop (collinear or repeated, in the ring or its inset) are removed first so
+  caps and walls share every edge; a bevel whose inset ring would intersect
+  itself or another ring is halved, and dropped after three tries.
 - **Inflate**: signed Euclidean distance of the silhouette, half thickness
   `sqrt(d/dmax) * depth/2`; the volume is stored as a continuous field
   (`half_thickness - |z|` inside, distance outside), not as voxels.
 - **Visual hull**: every orthographic view (front/side/back/left/top)
   contributes its silhouette's signed distance, low-pass filtered to the voxel
   spacing and scaled to studs; the hull is the minimum over views.
+- **Carving silhouettes** (visual hull and photo sets): interior holes are
+  filled, except holes whose pixels match the background colour model
+  (median weighted CIELAB distance below 5) and that cover at least 0.2 % of
+  the object: these are real gaps (chair-back slats, a mug handle) and are
+  carved through.
 - **Turntable** (unlabelled photos around the object): SIFT features, ratio
   test, essential matrix (RANSAC) and `recoverPose` between consecutive photos
   give the yaw steps. If fewer than half of the pairs match (plain surfaces),
@@ -176,6 +196,9 @@ segments and cushion subdivision; each can also be raised separately.
 4. Quality impact: symmetric surface deviation between the full-detail and the
    delivered model (40k samples each way, KD-trees), reported as mean and 95th
    percentile in % of the bounding diagonal, rated negligible/low/moderate/high.
+   Validation repairs zero-area sliver triangles by flipping their longest
+   edge with the neighbouring triangle (deleting them would open the surface)
+   and removes index-degenerate and duplicate triangles.
 5. Roblox: meshes above 20,000 triangles are split into several MeshParts;
    pivot placement (bottom centre by default, centre, back, origin); size in
    studs; collision proxy (box, convex hull or per-part hulls) and the
@@ -224,8 +247,9 @@ only with emitters, AO only when it varies, normal only with relief).
   Blender 5.2.
 - **RBXM / RBXMX** (`rbxm.py`): binary format version 0 with META, INST, PROP,
   PRNT (depth-first post-order) and END chunks, interleaved/zig-zag integers,
-  Roblox float encoding, CFrame rotation IDs; XML version 4. Verified with
-  rbx-dom (binary and XML decode to identical trees).
+  Roblox float encoding, CFrame rotation IDs; XML version 4 whose numbers are
+  the same float32 values (9 significant digits). Verified with rbx-dom
+  (binary and XML decode to identical trees).
 - **GLB** (`interchange.py`): glTF 2.0, metallic-roughness with packed ORM
   texture, normal and emissive textures, V flipped to glTF's convention.
 - **OBJ/MTL** with PBR extension keys; **STL** binary.

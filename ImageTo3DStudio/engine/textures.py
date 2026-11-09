@@ -725,9 +725,24 @@ def height_to_normal(height_img: np.ndarray, mask: np.ndarray, density: float, s
     return n / np.maximum(np.linalg.norm(n, axis=2, keepdims=True), 1e-9)
 
 
-def push_pull_fill(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Fill unmasked pixels from a mask-weighted image pyramid (seamless gutters)."""
+def push_pull_fill(img: np.ndarray, mask: np.ndarray, edge_band: int = 8) -> np.ndarray:
+    """Fill the gutters around UV islands.
+
+    Pixels within ``edge_band`` of an island copy their nearest island texel
+    (edge padding), so mip levels sampled at an island border do not pull in
+    colours or normals of the neighbouring island; everything farther away is
+    filled from a mask-weighted image pyramid (smooth, seamless background).
+    """
+    from scipy.ndimage import distance_transform_edt
+
     img = img.astype(np.float64)
+    mask = np.asarray(mask, dtype=bool)
+    if mask.any() and not mask.all() and edge_band > 0:
+        dist, (iy, ix) = distance_transform_edt(~mask, return_indices=True)
+        near = ~mask & (dist <= edge_band)
+        img = img.copy()
+        img[near] = img[iy[near], ix[near]]
+        mask = mask | near
     m = mask.astype(np.float64)
     levels = []
     cur_i, cur_m = img * m[..., None], m

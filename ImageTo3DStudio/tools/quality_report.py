@@ -174,10 +174,8 @@ def main() -> int:
             p = subprocess.run([args.rbxcheck, str(pkg / "model.rbxm")], capture_output=True, text=True)
             q = subprocess.run([args.rbxcheck, str(pkg / "model.rbxmx")], capture_output=True, text=True)
             row["rbxm_check"] = {"ok": p.returncode == 0 and q.returncode == 0, "parts": p.stdout.count("Part '"), "binary_equals_xml": p.stdout == q.stdout}
-        dest = out / case["name"]
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(pkg, dest)
+        (out / "previews").mkdir(exist_ok=True)
+        shutil.copy(pkg / "previews" / "preview.png", out / "previews" / f"{case['name']}.png")
         shutil.copy(res["zip"], out / Path(res["zip"]).name)
         rows.append(row)
         print(case["name"], row["status"], row.get("strategy"), row.get("triangles"), f"{row.get('seconds')}s", f"IoU {row.get('silhouette_iou')}", flush=True)

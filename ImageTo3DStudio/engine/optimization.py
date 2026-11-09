@@ -123,7 +123,10 @@ def transfer_normals(source: g.Mesh, target: g.Mesh, k: int = 6) -> np.ndarray:
     """Shading normals for ``target`` interpolated from a denser ``source`` of the same surface.
 
     Decimated organic surfaces keep the smooth shading of the full-resolution
-    surface instead of the facet normals of their sliver triangles.
+    surface instead of the facet normals of their sliver triangles. Where the
+    transferred normal leans more than 25 degrees away from the target's own
+    crease-aware normal (a rim or other hard edge), the own normal is kept so
+    the edge stays crisp instead of smearing into wedge-shaped highlights.
     """
     own = target.normals if target.normals is not None else g.vertex_normals(target)
     if source.normals is None or len(source.vertices) < k:
@@ -132,7 +135,7 @@ def transfer_normals(source: g.Mesh, target: g.Mesh, k: int = 6) -> np.ndarray:
     w = 1.0 / np.maximum(dist, 1e-9)
     n = np.einsum("nk,nkc->nc", w, source.normals[idx])
     n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
-    agree = np.sum(n * own, axis=1) > 0.5
+    agree = np.sum(n * own, axis=1) > np.cos(np.radians(25.0))
     return np.where(agree[:, None], n, own)
 
 

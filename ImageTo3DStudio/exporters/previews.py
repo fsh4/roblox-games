@@ -163,9 +163,12 @@ const controls = new OrbitControls(camera, renderer.domElement);
 new GLTFLoader().parse(glb, "", gltf => {{
   const root = gltf.scene; scene.add(root);
   const box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
-  const r = size.length() * 0.9;
-  camera.position.set(mid.x + r * 0.6, mid.y + r * 0.45, mid.z - r * 0.75);
-  controls.target.copy(mid); controls.update();
+  const radius = size.length() / 2;
+  const vfov = THREE.MathUtils.degToRad(camera.fov), hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  const dist = radius / Math.sin(Math.min(vfov, hfov) / 2) * 1.05;
+  camera.position.copy(mid).addScaledVector(new THREE.Vector3(0.6, 0.45, -0.75).normalize(), dist);
+  camera.near = dist / 200; camera.far = dist * 50; camera.updateProjectionMatrix();
+  controls.target.copy(mid); controls.minDistance = radius * 0.3; controls.maxDistance = dist * 4; controls.update();
   const grid = new THREE.GridHelper(Math.max(size.x, size.z) * 2.5, 20, 0x3a4250, 0x232a33); grid.position.y = box.min.y; scene.add(grid);
 }});
 addEventListener("resize", () => {{ camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }});

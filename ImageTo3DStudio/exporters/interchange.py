@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from engine.geometry import Mesh
+from engine.render import vertex_tangents
 
 MeshList = Sequence[Tuple[str, Mesh]]
 
@@ -89,6 +90,9 @@ def write_glb(path: str, meshes: MeshList, maps: Dict[str, np.ndarray], material
     for name, mesh in meshes:
         pos = mesh.vertices.astype(np.float32)
         nrm = mesh.normals.astype(np.float32)
+        # The tangent frame the normal map was baked in; without it viewers
+        # derive their own per pixel and show seams where the frames differ.
+        tan = vertex_tangents(mesh.vertices, mesh.faces, mesh.normals, mesh.uvs).astype(np.float32)
         uv = mesh.uvs.astype(np.float32).copy()
         uv[:, 1] = 1.0 - uv[:, 1]
         idx = mesh.faces.astype(np.uint32).reshape(-1)
@@ -96,6 +100,7 @@ def write_glb(path: str, meshes: MeshList, maps: Dict[str, np.ndarray], material
             "attributes": {
                 "POSITION": add_accessor(pos, 5126, "VEC3", 34962, True),
                 "NORMAL": add_accessor(nrm, 5126, "VEC3", 34962),
+                "TANGENT": add_accessor(tan, 5126, "VEC4", 34962),
                 "TEXCOORD_0": add_accessor(uv, 5126, "VEC2", 34962),
             },
             "indices": add_accessor(idx.reshape(-1, 1), 5125, "SCALAR", 34963),
