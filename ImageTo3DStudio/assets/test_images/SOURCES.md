@@ -9,6 +9,7 @@
 | `plush_render.png` | Synthetic render with transparent background, same script (remeshed sphere plush toy). | Alpha-matte segmentation and silhouette inflation. |
 | `mug_front.png`, `mug_side.png`, `mug_back.png`, `mug_top.png` | Synthetic orthographic renders, same script (mug with handle; front, side, back and top view). | Multi-view visual hull. |
 | `chair_turn_00.jpg` ... `chair_turn_07.jpg` | Synthetic perspective renders, same script: the chair photographed every 45 degrees around it at 14 degrees elevation, saved as 640 px JPEG. The surfaces carry little texture, so feature matching fails and the silhouette-coherence fallback is what gets tested. | Photo-set mode (camera steps recovered from silhouette coherence when features do not match). |
+| `emblem_drawing.png` | Flat artwork drawn with Pillow by `tools/make_drawing.py` (outlined gold star with a centre hole). | Drawing detection and the extrusion strategy with a hole. |
 
 The synthetic objects are modelled in the render script independently of the
 engine's templates, so tests do not grade the engine on its own geometry. They

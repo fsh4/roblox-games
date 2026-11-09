@@ -332,6 +332,7 @@ class Features:
     drawing_likeness: float
     contour: np.ndarray
     width_profile: np.ndarray
+    row_convexity: float = 1.0
 
     def to_dict(self) -> dict:
         return {
@@ -340,7 +341,7 @@ class Features:
             "symmetry": round(self.symmetry, 4), "rectangularity": round(self.rectangularity, 4),
             "vertical_lines": self.vertical_lines, "horizontal_lines": self.horizontal_lines,
             "oblique_lines": self.oblique_lines, "line_length_ratio": round(float(self.line_length_ratio), 4),
-            "color_count": self.color_count, "drawing_likeness": round(self.drawing_likeness, 4),
+            "color_count": self.color_count, "drawing_likeness": round(self.drawing_likeness, 4), "row_convexity": round(self.row_convexity, 4),
             "palette": [{"color": [round(c, 4) for c in col], "share": round(s, 4)} for col, s in self.palette],
         }
 
@@ -433,17 +434,33 @@ def compute_features(img: LoadedImage, seg: Segmentation) -> Features:
             o += 1
     pal = palette(img.rgb, mask)
     significant = sum(1 for _, s in pal if s > 0.08)
-    px = img.rgb[mask].astype(np.float32) / 255.0
-    sat = np.max(px, 1) - np.min(px, 1)
-    flatness = 1.0 - min(1.0, float(np.std(cv2.Laplacian(gray, cv2.CV_32F)[mask])) / 40.0)
-    dark_outline = float(((gray < 50) & cv2.morphologyEx(filled.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((7, 7), np.uint8)).astype(bool)).mean() * 50)
-    drawing = float(np.clip(0.5 * flatness + 0.3 * min(dark_outline, 1.0) + 0.2 * float(np.mean(sat > 0.35)), 0, 1))
+    drawing = drawing_score(img.rgb, gray, mask, filled)
     prof = np.array([filled[y, x0:x1 + 1].sum() for y in range(y0, y1 + 1)], dtype=np.float64) / max(bw, 1)
+    runs = np.count_nonzero(np.diff(filled[y0:y1 + 1].astype(np.int8), axis=1) == 1, axis=1) + filled[y0:y1 + 1, 0]
+    row_convexity = float(np.mean(runs[filled[y0:y1 + 1].any(axis=1)] <= 1))
     return Features(
         (x0, y0, x1, y1), bw / max(bh, 1), area / (bw * bh), area / max(hull_area, 1.0),
         float(holes.sum()) / max(area, 1.0), hole_count, sym, axis, area / max(rect_area, 1.0),
-        v, h_, o, total_len / max(bw + bh, 1), significant, pal, drawing, cnt.reshape(-1, 2), prof,
+        v, h_, o, total_len / max(bw + bh, 1), significant, pal, drawing, cnt.reshape(-1, 2), prof, row_convexity,
     )
+
+
+def drawing_score(rgb: np.ndarray, gray: np.ndarray, mask: np.ndarray, filled: np.ndarray) -> float:
+    """0..1: how much the object looks like flat artwork rather than a photographed solid.
+
+    Drawings are mostly perfectly flat pixels (no shading gradient), use a few
+    exact colours and often carry a dark outline; photos and renders of solid
+    objects have shading everywhere and a continuous colour spread.
+    """
+    lap = np.abs(cv2.Laplacian(gray, cv2.CV_32F))[mask]
+    flat = float(np.clip((np.mean(lap < 3) - 0.45) / 0.35, 0, 1))
+    px = rgb[mask].astype(np.int32) // 16
+    counts = np.bincount(px[:, 0] * 256 + px[:, 1] * 16 + px[:, 2], minlength=4096)
+    top4 = np.sort(counts)[::-1][:4].sum() / max(len(px), 1)
+    palette_share = float(np.clip((top4 - 0.5) / 0.4, 0, 1))
+    band = cv2.morphologyEx(filled.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((7, 7), np.uint8)).astype(bool)
+    outline = float(np.mean(gray[band] < 70)) if band.any() else 0.0
+    return float(np.clip(0.5 * flat + 0.3 * palette_share + 0.2 * outline, 0, 1))
 
 
 def albedo_estimate(px_srgb: np.ndarray, band: Tuple[float, float] = (55.0, 92.0)) -> np.ndarray:

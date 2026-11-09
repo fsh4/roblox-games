@@ -35,8 +35,9 @@ CASES = [
     {"name": "Bed", "images": ["bed_photo.jpg"], "category": "auto", "triangles": 5000, "texture": 1024, "note": "real photo supplied by the owner"},
     {"name": "Chair", "images": ["chair_render.png"], "category": "auto", "triangles": 4000, "texture": 1024, "note": "synthetic Cycles render"},
     {"name": "Table", "images": ["table_render.png"], "category": "auto", "triangles": 2000, "texture": 512, "note": "synthetic Cycles render"},
-    {"name": "Vase", "images": ["vase_render.png"], "category": "revolve", "triangles": 3000, "texture": 512, "note": "synthetic Cycles render"},
-    {"name": "Plush", "images": ["plush_render.png"], "category": "inflate", "triangles": 5000, "texture": 512, "note": "synthetic render, PNG with alpha"},
+    {"name": "Vase", "images": ["vase_render.png"], "category": "auto", "triangles": 3000, "texture": 512, "note": "synthetic Cycles render"},
+    {"name": "Plush", "images": ["plush_render.png"], "category": "auto", "triangles": 5000, "texture": 512, "note": "synthetic render, PNG with alpha"},
+    {"name": "Emblem", "images": ["emblem_drawing.png"], "category": "auto", "triangles": 2000, "texture": 512, "note": "flat drawing, Pillow"},
     {"name": "Mug", "images": ["mug_front.png", "mug_side.png", "mug_back.png", "mug_top.png"], "views": ["front", "side", "back", "top"], "mode": "multi", "triangles": 4000, "texture": 512, "note": "four synthetic orthographic views"},
     {"name": "ChairScan", "images": [f"chair_turn_{k:02d}.jpg" for k in range(8)], "mode": "multi", "triangles": 4000, "texture": 512, "note": "eight unlabelled synthetic photos taken around the object"},
 ]

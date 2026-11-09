@@ -49,6 +49,13 @@ def _limit_resources(memory_mb: int):
     return apply if sys.platform.startswith("linux") else None
 
 
+def worker_env(base: Optional[dict] = None) -> dict:
+    """Environment for a worker process: capped math threads, no tokens or secrets."""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if "TOKEN" not in k.upper() and "SECRET" not in k.upper()}
+    env.update({"OMP_NUM_THREADS": "2", "OPENBLAS_NUM_THREADS": "2", "MKL_NUM_THREADS": "2", "PYTHONPATH": str(ROOT), "PYTHONUNBUFFERED": "1"})
+    return env
+
+
 class JobQueue:
     def __init__(self, jobs: JobStore, projects: ProjectStore, handler: EventHandler, concurrency: int = 2,
                  timeout_s: int = 900, memory_mb: int = 6144, python: Optional[str] = None):
@@ -154,9 +161,7 @@ class JobQueue:
         job_file.write_text(json.dumps(payload), encoding="utf-8")
         await asyncio.to_thread(self.jobs.start, job.id)
         await self._emit("started", job.id)
-        env = dict(os.environ)
-        env.update({"OMP_NUM_THREADS": "2", "OPENBLAS_NUM_THREADS": "2", "MKL_NUM_THREADS": "2", "PYTHONPATH": str(ROOT), "PYTHONUNBUFFERED": "1"})
-        env.pop("DISCORD_TOKEN", None)
+        env = worker_env()
         started = time.time()
         proc = await asyncio.create_subprocess_exec(
             self.python, "-m", "workers.processor", str(job_file), cwd=str(ROOT), env=env,

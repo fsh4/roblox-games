@@ -84,6 +84,21 @@ def test_generic_single_view_strategies(tmp_path, name, expected):
     assert res.stats["validation"]["ok"]
 
 
+@pytest.mark.parametrize("name,expected", [("emblem_drawing.png", "extrude"), ("vase_render.png", "revolve"), ("plush_render.png", "inflate")])
+def test_automatic_strategy_selection(tmp_path, name, expected):
+    src = image(name)
+    (tmp_path / "source").mkdir()
+    shutil.copy(src, tmp_path / "source" / name)
+    spec = pipeline.analyse_project(str(tmp_path), [str(tmp_path / "source" / name)])
+    assert spec["strategy"] == expected, spec["notes"]
+    if expected == "extrude":
+        spec, arrays = pipeline.load_spec(str(tmp_path))
+        assert any(k.startswith("hole") for k in arrays), "the emblem's centre hole must be kept"
+        res = pipeline.build_version(str(tmp_path), str(tmp_path / "v1"), spec, arrays, BuildSettings(triangle_budget=2000, texture_resolution=256, quality="draft"), "Emblem", "abcd1234", 1)
+        w, h, d = res.stats["size_studs"]
+        assert d < 0.3 * w and res.stats["validation"]["ok"]
+
+
 def test_multi_view_visual_hull(tmp_path):
     names = ["mug_front.png", "mug_side.png", "mug_back.png", "mug_top.png"]
     srcs = [image(n) for n in names]

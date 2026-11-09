@@ -40,6 +40,12 @@ Progress = Optional[Callable[[str, float], None]]
 # Refined template fits scoring below this are accepted; worse fits fall back to
 # the generic strategies (revolve / extrude / inflate).
 TEMPLATE_ACCEPT_SCORE = 1.12
+# A mirror-symmetric silhouette with one span per row is reproduced exactly by
+# a surface of revolution, so a template has to fit clearly better to win.
+LATHE_TEMPLATE_SCORE = 0.8
+# Compact silhouettes without straight structure (plush toys, rocks, food) are
+# rarely furniture or vehicles; an inflated silhouette is the safer default.
+ORGANIC_TEMPLATE_SCORE = 0.85
 
 CATEGORY_TEMPLATES = {
     "bed": "bed", "chair": "chair", "stool": "chair", "table": "table", "desk": "table",
@@ -105,11 +111,16 @@ def analyse(paths: Sequence[str], labels: Optional[Sequence[str]] = None, sensit
     return out
 
 
+def _straightness(f: an.Features) -> float:
+    """0..1 evidence of man-made structure: axis-aligned straight segments in the photo."""
+    return min(1.0, (f.vertical_lines + f.horizontal_lines) / 20.0)
+
+
 def rank_categories(src: Source) -> List[Tuple[str, float]]:
     """Deterministic prior over categories from silhouette and line features."""
     f = src.features
     s: Dict[str, float] = {}
-    straight = min(1.0, (f.vertical_lines + f.horizontal_lines) / 20.0)
+    straight = _straightness(f)
     s["bed"] = 0.5 * straight + (0.4 if 1.2 < f.aspect < 3.5 else 0.0) + (0.2 if f.fill_ratio < 0.75 else 0.0)
     s["sofa"] = 0.3 * straight + (0.4 if 1.4 < f.aspect < 4.0 else 0.0) + (0.3 if f.fill_ratio > 0.55 else 0.0)
     s["table"] = 0.5 * straight + (0.3 if f.aspect > 0.9 else 0.0) + (0.3 if f.fill_ratio < 0.55 else 0.0)
@@ -120,7 +131,7 @@ def rank_categories(src: Source) -> List[Tuple[str, float]]:
     s["house"] = 0.4 * straight + (0.3 if f.solidity > 0.85 else 0.0)
     s["car"] = (0.4 if 1.6 < f.aspect < 4.5 else 0.0) + (0.3 if f.solidity > 0.8 else 0.0) + 0.2 * (1 - straight)
     s["box"] = (0.6 if f.rectangularity > 0.85 and f.solidity > 0.9 else 0.0) + 0.2 * straight
-    s["revolve"] = (0.9 if f.symmetry > 0.9 else 0.0) + (0.2 if f.aspect < 1.4 else 0.0)
+    s["revolve"] = (0.9 if f.symmetry > 0.9 and f.row_convexity > 0.95 else 0.0) + (0.2 if f.aspect < 1.4 else 0.0)
     s["extrude"] = 0.8 * f.drawing_likeness + (0.2 if f.hole_count > 0 else 0.0)
     s["inflate"] = 0.4 + 0.3 * (1 - straight)
     return sorted(s.items(), key=lambda kv: -kv[1])
@@ -851,7 +862,13 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
     if chosen is None:
         report("comparing object templates", 0.08)
         target = make_target(src.image, src.seg)
-        candidates = [c for c, _ in ranking if c in TEMPLATES and c != "box"][:6]
+        f = src.features
+        lathe_like = f.symmetry > 0.9 and f.row_convexity > 0.95
+        organic = f.solidity > 0.8 and _straightness(f) < 0.5
+        # The lamp template is itself a lathe shape: a revolve reproduces lathe-like
+        # silhouettes exactly, and other silhouettes cannot be lamps.
+        candidates = [c for c, _ in ranking if c in TEMPLATES and c != "box"
+                      and not (c == "lamp" and (lathe_like or f.row_convexity < 0.9))][:6]
         coarse = []
         for c in candidates:
             res = fit_template(get_template(c), target, coarse_only=True)
@@ -872,13 +889,13 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
             alternatives.append({"template": c, "coarse_score": round(cs, 4), "refined_score": round(res.score, 4)})
         scored.sort()
         best_score, best = scored[0]
-        sym = src.features.symmetry
-        if best_score < TEMPLATE_ACCEPT_SCORE:
+        accept = LATHE_TEMPLATE_SCORE if lathe_like else ORGANIC_TEMPLATE_SCORE if organic else TEMPLATE_ACCEPT_SCORE
+        if best_score < accept:
             chosen = best
-        elif sym > 0.9:
-            chosen = "revolve"
-        elif src.features.drawing_likeness > 0.55:
+        elif f.drawing_likeness > 0.55:
             chosen = "extrude"
+        elif lathe_like:
+            chosen = "revolve"
         else:
             chosen = "inflate"
         notes.append(f"Detected category: {chosen} (template scores: " + ", ".join(f"{c} {s:.2f}" for s, c in scored) + ").")

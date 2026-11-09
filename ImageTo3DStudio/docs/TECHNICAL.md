@@ -126,14 +126,24 @@ largest visible flat face is perspective-rectified into an exemplar patch.
 - **Visual hull**: every orthographic view (front/side/back/left/top)
   contributes its silhouette's signed distance, low-pass filtered to the voxel
   spacing and scaled to studs; the hull is the minimum over views.
-- **Turntable**: SIFT features, ratio test, essential matrix (RANSAC) and
-  `recoverPose` between consecutive photos give the yaw steps; cameras are
-  placed on a circle. Each voxel takes the k-th largest signed distance over
-  views (k = views - 1), the continuous form of "inside all but one
-  silhouette". If fewer than half of the pairs match, the job falls back to
-  single-image mode and says why.
+- **Turntable** (unlabelled photos around the object): SIFT features, ratio
+  test, essential matrix (RANSAC) and `recoverPose` between consecutive photos
+  give the yaw steps. If fewer than half of the pairs match (plain surfaces),
+  equal steps are assumed and the signed step (10-120 degrees, then refined
+  to 0.5 degrees) and the camera elevation (0-35 degrees) are chosen by
+  silhouette coherence: carve a coarse 36-cell volume with all silhouettes,
+  reproject it into every photo and maximise the mean IoU with the
+  silhouettes (Hernandez, Schmitt and Cipolla 2007). The same score picks
+  direction and elevation for SIFT-derived angles. Cameras share one model
+  (distance from the object's pixel height, 2D shift from its bounding box).
+  The final 128-cell volume takes, per voxel, the k-th largest signed distance
+  over views (k = views - 1): the continuous form of "inside all but one
+  silhouette". If no step explains the silhouettes (agreement below 55 %),
+  the job falls back to single-image mode and says why.
 - **Meshing of fields** (inflate, visual hull, turntable): Gaussian
-  smoothing (0.9 voxel), marching cubes at level 0, Taubin smoothing; shading
+  smoothing (0.9 voxel for reference views, 0.6 for photo sets, whose thin
+  parts are only a few cells wide), always on the full grid, marching cubes
+  at level 0, Taubin smoothing; shading
   normals come from the field gradient, so neither the voxel grid nor the
   marching-cubes facets print bands into the baked normal map. After
   decimation the low mesh takes its shading normals from the dense surface.

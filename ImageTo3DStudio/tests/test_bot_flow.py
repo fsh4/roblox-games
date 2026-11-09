@@ -174,3 +174,18 @@ def test_rejects_non_image_upload(studio, tmp_path):
         assert not svc.projects.list_for_user(4242, 5, 0)
 
     asyncio.run(run())
+
+
+def test_busy_user_is_refused(studio, monkeypatch):
+    svc = studio.studio
+    monkeypatch.setattr(svc.cfg, "max_jobs_per_user", 1)
+    svc.jobs.create("0000abcd", 1, 4242, "create", {})
+
+    async def run():
+        it = FakeInteraction(studio)
+        await svc.start_create(it, [FakeAttachment(image("bed_photo.jpg"))])
+        msgs = [kw for k, kw in it.log if k in ("send_message", "followup")]
+        assert msgs and msgs[0]["embed"].title == "Busy"
+        assert not svc.projects.list_for_user(4242, 5, 0)
+
+    asyncio.run(run())

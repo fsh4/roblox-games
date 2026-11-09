@@ -89,3 +89,16 @@ def test_template_resizing_hits_target_dimensions():
     ext = hi - lo
     assert abs(ext[0] - 8.0) / 8.0 < 0.06
     assert abs(ext[1] - 3.0) / 3.0 < 0.06
+
+
+def test_split_for_roblox_respects_meshpart_limit():
+    from engine.optimization import split_for_roblox
+
+    m = g.sphere(2.0, segments=160, rings=150)
+    assert m.triangle_count > 2 * 20_000
+    parts = split_for_roblox([("Body", m)], 20_000)
+    assert len(parts) == int(np.ceil(m.triangle_count / 20_000))
+    assert all(p.triangle_count <= 20_000 for _, p in parts)
+    assert sum(p.triangle_count for _, p in parts) == m.triangle_count
+    merged = np.sort(np.concatenate([p.vertices[p.faces].reshape(-1, 9) for _, p in parts]), axis=0)
+    assert np.allclose(merged, np.sort(m.vertices[m.faces].reshape(-1, 9), axis=0)), "no triangle may be lost or changed"
