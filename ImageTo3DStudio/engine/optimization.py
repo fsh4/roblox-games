@@ -15,7 +15,7 @@ Budget strategy, in order of preference:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import numpy as np
 from scipy.spatial import cKDTree

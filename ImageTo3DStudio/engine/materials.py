@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import colorsys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np

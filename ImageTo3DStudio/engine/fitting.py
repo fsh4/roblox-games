@@ -13,13 +13,13 @@ The search is a coarse viewpoint grid followed by deterministic pattern search
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from . import render
-from .analyzer import LoadedImage, Segmentation, edge_map, periodic_count
+from .analyzer import LoadedImage, Segmentation, edge_map
 from .procedural import LOD, Template
 
 TAU = 6.0

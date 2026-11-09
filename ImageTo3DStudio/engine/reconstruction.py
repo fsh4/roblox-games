@@ -29,9 +29,9 @@ from PIL import Image
 from . import analyzer as an
 from . import geometry as g
 from . import render
-from .fitting import FitTarget, View, count_repeats, fit_template, label_map, make_target, project_scene, scaled_view
+from .fitting import FitTarget, View, count_repeats, fit_template, label_map, make_target, scaled_view
 from .materials import MaterialSpec, infer_kind, make_material, srgb_to_linear
-from .procedural import LOD, STUD, TEMPLATES, Template, get_template, m2s
+from .procedural import LOD, TEMPLATES, Template, get_template, m2s
 from .scene import NativePrimitive, Part, Scene
 from .textures import PhotoProjection
 

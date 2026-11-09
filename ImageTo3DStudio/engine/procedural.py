@@ -10,13 +10,12 @@ Coordinates: floor at y = 0, object centred on x = z = 0, front faces -Z.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from . import geometry as g
-from .geometry import Mesh
 from .materials import MaterialSpec, make_material
 from .scene import NativePrimitive, Part, Scene
 
@@ -215,7 +214,6 @@ class Builder:
             detail.apply_transform(frame)
         rmax = max(r for r, _ in prof)
         ys = [y for _, y in prof]
-        h = max(ys) - min(ys)
         native = []
         if native_shape == "Ball":
             cf = g.translation(np.asarray(base) + np.array([0, (max(ys) + min(ys)) / 2, 0]))
@@ -531,11 +529,9 @@ def _lamp(b: Builder, p: Dict[str, float]) -> None:
 def _house(b: Builder, p: Dict[str, float]) -> None:
     W, D, H = p["width"], p["depth"], p["wall_height"]
     roof_h, over = p["roof_height"], p["roof_overhang"]
-    t = 0.4
     b.board("Walls", "walls", (W, H, D), (0, H / 2, 0), 0.05, 0, group="Walls")
     b.board("Foundation", "trim", (W + 0.3, 0.4, D + 0.3), (0, 0.2, 0), 0.04, 0, group="Walls")
     half = W / 2 + over
-    outline = np.array([[-half, 0.0], [half, 0.0], [0.0, roof_h]])
     gable = np.array([[-W / 2, 0.0], [W / 2, 0.0], [0.0, roof_h * (W / 2) / half]])
     b.prism("Gable", "walls", gable, D - 0.02, (0, H, 0), group="Roof")
     slope_len = float(np.hypot(half, roof_h))

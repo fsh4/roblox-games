@@ -377,7 +377,6 @@ def shade(
     nrm /= np.maximum(np.linalg.norm(nrm, axis=2, keepdims=True), 1e-9)
     ldir = np.asarray(light_dir, dtype=np.float64)
     ldir /= np.linalg.norm(ldir)
-    shadow_term = np.ones((h, w))
     light_cam = None
     if shadows:
         light_cam = _light_camera(vertices, ldir)

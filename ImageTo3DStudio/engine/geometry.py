@@ -10,7 +10,7 @@ Every builder returns a closed, outward-wound triangle mesh with:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
 import numpy as np

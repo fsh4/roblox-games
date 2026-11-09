@@ -30,7 +30,7 @@ from scipy.spatial import cKDTree
 from . import render
 from .geometry import Mesh
 from .materials import MaterialSpec, linear_to_srgb, srgb_to_linear
-from .scene import Part, Scene
+from .scene import Scene
 
 Progress = Optional[Callable[[str, float], None]]
 
