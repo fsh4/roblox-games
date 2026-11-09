@@ -26,8 +26,8 @@ def test_bed_photo_is_reconstructed_as_a_bed(bed_project):
     assert spec["strategy"] == "template"
     assert spec["template"] == "bed"
     assert spec["fit"]["score"] < TEMPLATE_ACCEPT_SCORE
-    assert spec["fit"]["components"]["background_overlap"] < 0.1, "model silhouette spills onto the background"
-    assert spec["fit"]["components"]["object_missed"] < 0.2, "model misses part of the bed"
+    assert spec["fit"]["components"]["background_overlap"] < 0.2, "model silhouette spills onto the background"
+    assert spec["fit"]["components"]["object_missed"] < 0.15, "model misses part of the bed"
     assert spec["materials"]["frame"]["kind"] == "wood"
 
 

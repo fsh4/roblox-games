@@ -235,7 +235,9 @@ segments and cushion subdivision; each can also be raised separately.
    converted into the low mesh's tangent frame, then filtered per part in
    texture space) blended with material micro-relief from height fields;
    OpenGL convention.
-7. **Gutters** are filled with a mask-weighted push-pull pyramid.
+7. **Gutters**: pixels within 8 px of an island copy their nearest island
+   texel (edge padding, so mip levels do not mix neighbouring islands); the
+   rest is filled with a mask-weighted push-pull pyramid.
 
 Maps are only written when meaningful (metalness only with metal, emissive
 only with emitters, AO only when it varies, normal only with relief).
@@ -251,7 +253,8 @@ only with emitters, AO only when it varies, normal only with relief).
   the same float32 values (9 significant digits). Verified with rbx-dom
   (binary and XML decode to identical trees).
 - **GLB** (`interchange.py`): glTF 2.0, metallic-roughness with packed ORM
-  texture, normal and emissive textures, V flipped to glTF's convention.
+  texture, normal and emissive textures, V flipped to glTF's convention, and
+  the per-vertex tangents the normal map was baked with.
 - **OBJ/MTL** with PBR extension keys; **STL** binary.
 - **Previews** (`previews.py`): software-rendered with key/fill/hemisphere
   light and a percentage-closer shadow map (normal offset plus slope-scaled

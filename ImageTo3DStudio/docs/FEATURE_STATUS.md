@@ -80,7 +80,7 @@ the evidence column says which.
 | Automatic upload to Roblox (Open Cloud) | Not implemented | Needs the owner's Open Cloud API key; the FBX is imported by hand |
 | GLB, OBJ + MTL, STL | Done + tested | `test_glb_is_valid_gltf`, `test_obj_and_stl_roundtrip` |
 | Previews: orthographic views, three-quarter, wireframe, contact sheet, turntable GIF | Done + tested | Generated and inspected in every measured run |
-| Interactive `viewer.html` (three.js) | Done, not fully tested | See the test report for the browser check |
+| Interactive `viewer.html` (three.js) | Done + tested | Opened in headless Chromium: the textured model loads and renders with no console errors (needs internet for the three.js library) |
 | Metadata files, Luau import helper, README per package | Done + tested | `test_package_is_complete_and_within_budget` |
 | Deterministic ZIP without symlinks or outside files | Done + tested | `test_zip_contains_only_package_files` |
 | Re-export from a stored version in another format | Done + tested | `test_export_conversion_from_package`, bot flow test |
