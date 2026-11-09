@@ -35,24 +35,31 @@ class LOD:
     bevel_scale: float = 1.0
     keep_details: bool = True
     fast: bool = False
+    bevel_q: Optional[float] = None
+    round_q: Optional[float] = None
+    cushion_q: Optional[float] = None
+
+    def _q(self, override: Optional[float]) -> float:
+        return self.q if override is None else override
 
     @property
     def bevel_segments(self) -> int:
-        if self.q < 0.08:
+        q = self._q(self.bevel_q)
+        if q < 0.08:
             return 0
-        return int(np.clip(round(1 + self.q * 3), 1, 4))
+        return int(np.clip(round(1 + q * 3), 1, 4))
 
     @property
     def round_segments(self) -> int:
-        return int(np.clip(round(6 + self.q * 26), 6, 32))
+        return int(np.clip(round(6 + self._q(self.round_q) * 26), 6, 32))
 
     @property
     def rings(self) -> int:
-        return int(np.clip(round(4 + self.q * 12), 4, 16))
+        return int(np.clip(round(4 + self._q(self.round_q) * 12), 4, 16))
 
     @property
     def cushion_divisions(self) -> int:
-        return int(np.clip(round(self.q * 7), 0, 7))
+        return int(np.clip(round(self._q(self.cushion_q) * 7), 0, 7))
 
 
 @dataclass

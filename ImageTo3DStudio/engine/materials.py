@@ -126,7 +126,7 @@ def parse_hex_color(text: str) -> Optional[Tuple[float, float, float]]:
         return None
 
 
-def infer_kind(color_srgb: Sequence[float], texture_strength: float, orientation_coherence: float, specular_ratio: float, candidates: Sequence[str]) -> str:
+def infer_kind(color_srgb: Sequence[float], texture_strength: float, orientation_coherence: float, specular_ratio: float, candidates: Sequence[str], prior: Optional[str] = None) -> str:
     """Pick a material kind for a region using colour and texture statistics.
 
     ``texture_strength`` is the normalised local contrast, ``orientation_coherence``
@@ -163,6 +163,8 @@ def infer_kind(color_srgb: Sequence[float], texture_strength: float, orientation
             score += 0.4 * min(texture_strength * 6, 1.0)
         else:
             score += 0.2
+        if kind == prior:
+            score += 0.45
         scores[kind] = score
     return max(scores.items(), key=lambda kv: kv[1])[0] if scores else "generic"
 

@@ -555,6 +555,7 @@ class PhotoProjection:
     mirror_center: float = 0.0
     weight_floor: float = 0.12
     extra: List["PhotoProjection"] = field(default_factory=list)
+    pre: Optional[np.ndarray] = None
 
 
 def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_verts: np.ndarray, all_faces: np.ndarray):
@@ -573,14 +574,21 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
     diam = float(np.linalg.norm(all_verts.max(0) - all_verts.min(0)))
     for view in [proj] + list(proj.extra):
         cam = view.camera
-        depth = render.depth_map(cam, all_verts, all_faces)
+        if view.pre is not None:
+            mv = all_verts @ view.pre[:3, :3].T + view.pre[:3, 3]
+            vpos = pos @ view.pre[:3, :3].T + view.pre[:3, 3]
+            vnrm = nrm @ np.linalg.inv(view.pre[:3, :3])
+            vnrm /= np.maximum(np.linalg.norm(vnrm, axis=1, keepdims=True), 1e-9)
+        else:
+            mv, vpos, vnrm = all_verts, pos, nrm
+        depth = render.depth_map(cam, mv, all_faces)
         h, w = depth.shape
         ih, iw = view.image_lin.shape[:2]
         for mirrored in (False, True):
             if mirrored and view.mirror_axis is None:
                 continue
-            p = pos.copy()
-            n = nrm.copy()
+            p = vpos.copy()
+            n = vnrm.copy()
             if mirrored:
                 ax = view.mirror_axis
                 p[:, ax] = 2 * view.mirror_center - p[:, ax]

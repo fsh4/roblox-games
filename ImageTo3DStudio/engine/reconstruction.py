@@ -126,33 +126,157 @@ def rank_categories(src: Source) -> List[Tuple[str, float]]:
 # Template strategy
 # ---------------------------------------------------------------------------
 
+def _lab(color) -> np.ndarray:
+    c = (np.clip(np.asarray(color, dtype=np.float64), 0, 1) * 255).astype(np.uint8).reshape(1, 1, 3)
+    return cv2.cvtColor(c, cv2.COLOR_RGB2LAB).reshape(3).astype(np.float64)
+
+
+def _specific_regions(rgb: np.ndarray, regions: Dict[str, np.ndarray], families: Optional[Dict[str, str]] = None) -> Tuple[Dict[str, np.ndarray], Dict[str, float]]:
+    """Assign photo colour clusters to template materials, family-aware.
+
+    Fitting error makes projected regions overlap neighbouring materials (the
+    duvet region also covers the wooden rail). The pixels of all regions are
+    clustered together in CIELAB with a low lightness weight (so shading of one
+    surface stays in one cluster). Materials are processed from the largest
+    region down; each takes the cluster most of its pixels vote for, except
+    clusters already claimed by a material of a different family (wood vs
+    fabric). The region is then restricted to pixels whose chroma matches the
+    chosen cluster, keeping both lit and shaded pixels of that surface. The
+    returned confidence is the share of the region that voted for that cluster.
+    """
+    if len(regions) < 2:
+        return regions, {kk: 1.0 for kk in regions}
+    lab_img = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    wts = np.array([0.35, 1.0, 1.0], np.float32)
+    rng = np.random.default_rng(4)
+    pooled = []
+    for reg in regions.values():
+        px = lab_img[reg]
+        if len(px) > 15000:
+            px = px[rng.choice(len(px), 15000, replace=False)]
+        pooled.append(px)
+    pool = np.concatenate(pooled) * wts
+    k = int(min(6, 2 + len(regions)))
+    crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.3)
+    _, _, centers = cv2.kmeans(pool.astype(np.float32), k, None, crit, 3, cv2.KMEANS_PP_CENTERS)
+    families = families or {}
+    votes_by_key = {}
+    for key, reg in regions.items():
+        px = lab_img[reg] * wts
+        assign = np.argmin(np.linalg.norm(px[:, None, :] - centers[None], axis=2), axis=1)
+        votes_by_key[key] = np.bincount(assign, minlength=k).astype(np.float64)
+    fams = sorted({families.get(kk, kk) for kk in regions})
+    density = np.zeros((len(fams), k))
+    for fi, fam in enumerate(fams):
+        members = [kk for kk in regions if families.get(kk, kk) == fam]
+        total = sum(float(regions[kk].sum()) for kk in members)
+        density[fi] = sum(votes_by_key[kk] for kk in members) / max(total, 1.0)
+    allowed = density >= 0.7 * density.max(axis=0, keepdims=True)
+    out = {}
+    conf = {}
+    for key, reg in regions.items():
+        fi = fams.index(families.get(key, key))
+        votes = votes_by_key[key].copy()
+        votes[~allowed[fi]] = -1.0
+        best = int(np.argmax(votes))
+        if votes[best] <= 0:
+            out[key] = reg
+            conf[key] = 0.0
+            continue
+        chroma_c = centers[best][1:]
+        chroma_d = np.linalg.norm(lab_img[..., 1:] - chroma_c, axis=2)
+        light_d = np.abs(lab_img[..., 0] * wts[0] - centers[best][0]) / wts[0]
+        sel = reg & (chroma_d < 10.0) & (light_d < 70)
+        conf[key] = float(sel.sum() / max(reg.sum(), 1))
+        out[key] = sel if sel.sum() >= 80 else reg
+    return out, conf
+
+
 def _materials_from_fit(template: Template, params, view: View, src: Source, target: FitTarget, work_dir: str) -> Tuple[Dict[str, MaterialSpec], List[str]]:
+    """Measure each template material on the photo pixels its parts cover.
+
+    Regions are eroded to stay away from boundaries; colours use the robust
+    albedo estimate. A material whose colour matches a larger material of a
+    different family (fabric reading as the wooden frame) is treated as
+    contaminated by fitting error and borrows the colour of a confidently
+    measured material of its own family, or the template default. Materials
+    of one family with the same chroma but different brightness are taken to
+    be the same surface in light and shadow and share the lit colour.
+    """
     rgb = src.image.rgb
     h, w = rgb.shape[:2]
     v = scaled_view(view, w / target.width, w, h)
     lab, scene, keys, (xy, z, cam, bounds) = label_map(template, params, v, w, h)
     zones = src.seg.zones
     notes = []
-    mats: Dict[str, MaterialSpec] = {}
+    measured: Dict[str, dict] = {}
     slots = {s.key: s for s in template.materials}
+    erode = max(3, int(round(min(h, w) / 160)))
+    regions = {}
+    for i, key in enumerate(keys):
+        region = (lab == i) & (zones != 0)
+        region = cv2.erode(region.astype(np.uint8), np.ones((2 * erode + 1, 2 * erode + 1), np.uint8)).astype(bool)
+        if key in slots and region.sum() >= 150:
+            regions[key] = region
+    families = {key: slots[key].default_kind for key in regions}
+    picked, confidence = _specific_regions(rgb, regions, families)
+    for key, region in picked.items():
+        if region.sum() >= 80:
+            measured[key] = an.region_stats(rgb, region)
+            measured[key]["confidence"] = confidence.get(key, 0.0)
+    decided: Dict[str, Tuple[str, tuple, str]] = {}
+    for key, st in measured.items():
+        slot = slots[key]
+        kind = infer_kind(st["color"], st["texture"], st["coherence"], st["specular"], slot.candidates, prior=slot.default_kind) if len(slot.candidates) > 1 else slot.candidates[0]
+        color = tuple(st["color_lit"] if kind in ("fabric", "painted", "plastic", "ceramic") else st["color"])
+        decided[key] = (kind, color, "measured from photo")
+    for key, st in measured.items():
+        slot = slots[key]
+        kind, color, source = decided[key]
+        reason = None
+        if st.get("confidence", 1.0) < 0.4:
+            reason = f"only {st.get('confidence', 0):.0%} of its photo region agreed on one colour"
+        for other, ost in measured.items():
+            if other == key or slots[other].default_kind == slot.default_kind or ost["count"] <= st["count"]:
+                continue
+            if np.linalg.norm(_lab(decided[other][1])[1:] - _lab(color)[1:]) < 14:
+                reason = f"its photo region overlapped '{slots[other].label}'"
+        if reason:
+            peers = [k for k in measured if k != key and slots[k].default_kind == slot.default_kind and decided[k][2].startswith("measured")]
+            if peers:
+                best = max(peers, key=lambda k: _lab(decided[k][1])[0])
+                decided[key] = (decided[best][0], decided[best][1], f"same material as '{slots[best].label}' ({reason})")
+            else:
+                decided[key] = (slot.default_kind, slot.default_color, f"template default ({reason})")
+    family_members: Dict[str, List[str]] = {}
+    for key in measured:
+        family_members.setdefault(slots[key].default_kind, []).append(key)
+    for fam, members in family_members.items():
+        for key in members:
+            kind, color, source = decided[key]
+            for other in members:
+                ocolor = decided[other][1]
+                if other != key and np.linalg.norm(_lab(ocolor)[1:] - _lab(color)[1:]) < 8 and _lab(ocolor)[0] > _lab(color)[0] + 8:
+                    color = ocolor
+                    source = f"{source}; lit colour taken from '{slots[other].label}' (same fabric in shadow)"
+            decided[key] = (kind, color, source)
+    mats: Dict[str, MaterialSpec] = {}
     for i, key in enumerate(keys):
         slot = slots.get(key)
-        region = (lab == i) & (zones != 0)
-        region = cv2.erode(region.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
         if slot is None:
             continue
-        if region.sum() < 150:
+        st = measured.get(key)
+        if st is None:
             mats[key] = make_material(key, slot.default_kind, slot.default_color, quilted=slot.quilted, source="template default (not visible)", name=slot.label)
             continue
-        st = an.region_stats(rgb, region)
-        kind = infer_kind(st["color"], st["texture"], st["coherence"], st["specular"], slot.candidates) if len(slot.candidates) > 1 else slot.candidates[0]
-        mat = make_material(key, kind, tuple(st["color"]), quilted=slot.quilted, source="measured from photo", name=slot.label)
-        if kind in ("wood", "stone", "leather") or (kind == "fabric" and st["texture"] > 0.03):
+        kind, color, source = decided[key]
+        mat = make_material(key, kind, color, quilted=slot.quilted, source=source, name=slot.label)
+        if source.startswith("measured") and (kind in ("wood", "stone", "leather") or (kind == "fabric" and st["texture"] > 0.045)):
             ex = _extract_exemplar(scene, key, cam, v, rgb, lab, i, work_dir, w, h)
             if ex is not None:
                 mat.exemplar, mat.exemplar_density = ex
         mats[key] = mat
-        notes.append(f"{slot.label}: {kind}, colour {mat.hex_color} from {int(st['count'])} pixels")
+        notes.append(f"{slot.label}: {kind}, colour {mat.hex_color} ({source}, {int(st['count'])} px)")
     return mats, notes
 
 
@@ -877,10 +1001,20 @@ def _view_camera(bounds: np.ndarray, view: View, w: int, h: int) -> render.Camer
     return cam
 
 
+def _json_safe(o):
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(type(o).__name__)
+
+
 def save_reconstruction(rec: Reconstruction, folder: str) -> None:
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, "spec.json"), "w", encoding="utf-8") as fh:
-        json.dump(rec.spec, fh, indent=2)
+        json.dump(rec.spec, fh, indent=2, default=_json_safe)
     if rec.arrays:
         np.savez_compressed(os.path.join(folder, "spec_data.npz"), **rec.arrays)
     if rec.preview_overlay is not None:

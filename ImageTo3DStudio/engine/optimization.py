@@ -57,24 +57,45 @@ class BudgetReport:
         }
 
 
-def solve_lod(build: Callable[[float], Scene], budget: int, iterations: int = 9) -> Tuple[Scene, float]:
-    """Largest LOD q in [0, 1] whose triangle count fits ``budget``."""
-    lo, hi = 0.0, 1.0
-    best = build(0.0)
-    best_q = 0.0
+def solve_lod(build: Callable[[dict], Scene], budget: int, q_cap: float = 1.0, iterations: int = 8) -> Tuple[Scene, dict]:
+    """Highest level of detail that fits ``budget``.
+
+    First a binary search on the shared quality ``q``; then each sub-level
+    (cushion subdivision, round segments, bevel segments) is raised on its own
+    while the budget allows, so the triangle count lands close to the request.
+    """
+    lod = {"q": 0.0}
+    best = build(lod)
     if best.triangle_count > budget:
-        return best, 0.0
-    top = build(1.0)
+        return best, lod
+    top = build({"q": q_cap})
     if top.triangle_count <= budget:
-        return top, 1.0
+        return top, {"q": q_cap}
+    lo, hi = 0.0, q_cap
     for _ in range(iterations):
         mid = 0.5 * (lo + hi)
-        sc = build(mid)
+        sc = build({"q": mid})
         if sc.triangle_count <= budget:
-            best, best_q, lo = sc, mid, mid
+            best, lod, lo = sc, {"q": mid}, mid
         else:
             hi = mid
-    return best, best_q
+    for key in ("cushion_q", "round_q", "bevel_q"):
+        probe = build({**lod, key: q_cap})
+        if probe.triangle_count == best.triangle_count:
+            continue
+        if probe.triangle_count <= budget:
+            best, lod = probe, {**lod, key: q_cap}
+            continue
+        a, b = lod["q"], q_cap
+        for _ in range(6):
+            mid = 0.5 * (a + b)
+            sc = build({**lod, key: mid})
+            if sc.triangle_count <= budget:
+                best, a = sc, mid
+                lod = {**lod, key: mid}
+            else:
+                b = mid
+    return best, lod
 
 
 def decimate_mesh(mesh: g.Mesh, target: int, smooth_angle: float = 40.0) -> g.Mesh:

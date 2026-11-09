@@ -325,7 +325,7 @@ class Features:
             "solidity": round(self.solidity, 4), "hole_ratio": round(self.hole_ratio, 4), "hole_count": self.hole_count,
             "symmetry": round(self.symmetry, 4), "rectangularity": round(self.rectangularity, 4),
             "vertical_lines": self.vertical_lines, "horizontal_lines": self.horizontal_lines,
-            "oblique_lines": self.oblique_lines, "line_length_ratio": round(self.line_length_ratio, 4),
+            "oblique_lines": self.oblique_lines, "line_length_ratio": round(float(self.line_length_ratio), 4),
             "color_count": self.color_count, "drawing_likeness": round(self.drawing_likeness, 4),
             "palette": [{"color": [round(c, 4) for c in col], "share": round(s, 4)} for col, s in self.palette],
         }
@@ -432,16 +432,42 @@ def compute_features(img: LoadedImage, seg: Segmentation) -> Features:
     )
 
 
+def albedo_estimate(px_srgb: np.ndarray, band: Tuple[float, float] = (55.0, 92.0)) -> np.ndarray:
+    """Surface colour from region pixels, robust to shadows and contamination.
+
+    The dominant CIELAB cluster is kept (rejects pixels of neighbouring
+    materials); inside it, pixels between the 55th and 92nd luminance percentile
+    are averaged in linear light, which discards cast shadows and specular
+    highlights and approximates the lit diffuse colour.
+    """
+    px = np.asarray(px_srgb, dtype=np.float64)
+    if len(px) > 40000:
+        px = px[np.random.default_rng(1).choice(len(px), 40000, replace=False)]
+    if len(px) >= 60:
+        lab = cv2.cvtColor((px * 255).astype(np.uint8).reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(np.float32)
+        crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 25, 0.5)
+        _, lbl, centers = cv2.kmeans(lab, 2, None, crit, 2, cv2.KMEANS_PP_CENTERS)
+        lbl = lbl.ravel()
+        counts = np.bincount(lbl, minlength=2)
+        if np.linalg.norm(centers[0] - centers[1]) > 18 and counts.max() > 0.55 * len(lbl):
+            px = px[lbl == int(np.argmax(counts))]
+    lin = np.where(px <= 0.04045, px / 12.92, ((px + 0.055) / 1.055) ** 2.4)
+    lum = 0.2126 * lin[:, 0] + 0.7152 * lin[:, 1] + 0.0722 * lin[:, 2]
+    lo, hi = np.percentile(lum, band[0]), np.percentile(lum, band[1])
+    sel = (lum >= lo) & (lum <= hi)
+    mean_lin = lin[sel].mean(axis=0) if sel.sum() > 10 else lin.mean(axis=0)
+    return np.where(mean_lin <= 0.0031308, mean_lin * 12.92, 1.055 * mean_lin ** (1 / 2.4) - 0.055)
+
+
 def region_stats(rgb: np.ndarray, region: np.ndarray) -> Dict[str, float]:
     """Colour and texture statistics used to infer material kinds."""
     if region.sum() < 30:
         return {"count": int(region.sum())}
     px = rgb[region].astype(np.float64) / 255.0
+    med = albedo_estimate(px)
+    bright = albedo_estimate(px, (72.0, 96.0))
     lin = np.where(px <= 0.04045, px / 12.92, ((px + 0.055) / 1.055) ** 2.4)
     lum = 0.2126 * lin[:, 0] + 0.7152 * lin[:, 1] + 0.0722 * lin[:, 2]
-    keep = (lum > np.percentile(lum, 8)) & (lum < np.percentile(lum, 92))
-    med_lin = np.median(lin[keep], axis=0) if keep.any() else np.median(lin, axis=0)
-    med = np.where(med_lin <= 0.0031308, med_lin * 12.92, 1.055 * med_lin ** (1 / 2.4) - 0.055)
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
     gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
@@ -456,7 +482,7 @@ def region_stats(rgb: np.ndarray, region: np.ndarray) -> Dict[str, float]:
     spec = float(np.mean(lum > np.percentile(lum, 50) * 2.2)) if lum.size else 0.0
     h, l, s = colorsys.rgb_to_hls(*[float(c) for c in med])
     return {
-        "count": int(region.sum()), "color": [float(c) for c in med], "lightness": l, "saturation": s, "hue": h * 360,
+        "count": int(region.sum()), "color": [float(c) for c in med], "color_lit": [float(c) for c in bright], "lightness": l, "saturation": s, "hue": h * 360,
         "texture": texture, "coherence": coherence, "specular": spec, "grain_angle": float(0.5 * np.degrees(np.arctan2(2 * jxy, jxx - jyy))),
     }
 
