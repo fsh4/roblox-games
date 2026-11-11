@@ -394,13 +394,13 @@
     "category": "turntable",
     "confidence": 0.45,
     "triangles": 4000,
-    "vertices": 4995,
+    "vertices": 5006,
     "meshes": 1,
     "native_parts": 12,
     "size_studs": [
       3.028,
-      5.479,
-      2.868
+      5.485,
+      2.87
     ],
     "maps": [
       "ambient_occlusion",
@@ -408,20 +408,17 @@
       "normal",
       "roughness"
     ],
-    "seconds": 45.6,
-    "peak_rss_mb": 1035.0,
+    "seconds": 52.7,
+    "peak_rss_mb": 976.0,
     "reduction_percent": 89.47,
     "impact": {
-      "mean_deviation_percent": 2.124,
-      "p95_deviation_percent": 5.802,
+      "mean_deviation_percent": 2.102,
+      "p95_deviation_percent": 5.737,
       "rating": "high"
     },
     "validation_ok": true,
-    "watertight": false,
-    "warnings": [
-      "Body: 3 non-manifold edges",
-      "Body: 6 edges with inconsistent winding"
-    ],
+    "watertight": true,
+    "warnings": [],
     "fit": null,
     "silhouette_iou": 0.688,
     "blender_fbx": {

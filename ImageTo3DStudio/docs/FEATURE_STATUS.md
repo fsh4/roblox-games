@@ -37,7 +37,7 @@ the evidence column says which.
 | Extrusion of flat artwork with holes | Done + tested | Emblem, chosen automatically, centre hole kept |
 | Silhouette inflation (organic objects) | Done + tested | Plush, chosen automatically |
 | Visual hull from labelled views (front/side/back/left/top) | Done + tested | Mug from 4 views |
-| Photo set walked around the object (unlabelled) | Done + tested | 8 chair photos: steps recovered as 44.5 degrees (true 45), elevation 15 (true 14), legs kept |
+| Photo set walked around the object (unlabelled) | Done + tested | 8 chair photos: steps recovered as 45.0 degrees (true 45), elevation 15 (true 14); legs and the three back slats kept |
 | Photo set: SIFT and essential-matrix path | Done, not fully tested | Implemented; the test set has too little texture, so the silhouette-coherence fallback is what was measured |
 | Concave regions (inside of a cup, under a chair seat) | Unsupported | No silhouette shows them; one photo cannot measure them |
 | Exact 1:1 replica of hidden sides from one photo | Unsupported | Hidden sides are estimated from symmetry and object knowledge |

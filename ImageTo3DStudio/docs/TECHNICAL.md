@@ -198,6 +198,10 @@ segments and cushion subdivision; each can also be raised separately.
 2. If even `q = 0` is too heavy (or for carved meshes), the budget is split
    across parts by `sqrt(triangles) * sqrt(area)` with a 12-triangle floor and
    each part is decimated with quadric edge collapse; UVs are re-charted.
+   When a collapse pinches a thin part (an edge shared by more than two
+   triangles), gentler settings are retried; any pinch that remains is split
+   into separate sheets (corners joined only across two-triangle edges, the
+   copies moved 2 mm apart), so the result stays closed and manifold.
 3. Unreachable budgets are reported with the minimum safe count.
 4. Quality impact: symmetric surface deviation between the full-detail and the
    delivered model (40k samples each way, KD-trees), reported as mean and 95th
