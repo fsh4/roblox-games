@@ -1,0 +1,440 @@
+[
+  {
+    "case": "Bed",
+    "input": "bed_photo.jpg",
+    "input_note": "real photo supplied by the owner",
+    "budget": 5000,
+    "status": "ok",
+    "strategy": "template",
+    "category": "bed",
+    "confidence": 0.479,
+    "triangles": 4512,
+    "vertices": 3392,
+    "meshes": 1,
+    "native_parts": 24,
+    "size_studs": [
+      4.437,
+      4.149,
+      7.541
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "normal",
+      "roughness"
+    ],
+    "seconds": 225.3,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 77.29,
+    "impact": {
+      "mean_deviation_percent": 0.275,
+      "p95_deviation_percent": 0.654,
+      "rating": "low"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": {
+      "background_overlap": 0.1113,
+      "object_missed": 0.1281,
+      "probable_missed": 0.214,
+      "edge_chamfer": 0.4222,
+      "edge_coverage": 0.2954
+    },
+    "silhouette_iou": 0.671,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 4512,
+      "packed_images": 3,
+      "texture_sockets": [
+        "Base Color",
+        "Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 24,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "Chair",
+    "input": "chair_render.png",
+    "input_note": "synthetic Cycles render",
+    "budget": 4000,
+    "status": "ok",
+    "strategy": "template",
+    "category": "chair",
+    "confidence": 0.704,
+    "triangles": 3900,
+    "vertices": 2808,
+    "meshes": 1,
+    "native_parts": 13,
+    "size_studs": [
+      1.414,
+      3.214,
+      1.714
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "normal",
+      "roughness"
+    ],
+    "seconds": 124.9,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 48.98,
+    "impact": {
+      "mean_deviation_percent": 0.03,
+      "p95_deviation_percent": 0.238,
+      "rating": "negligible"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": {
+      "background_overlap": 0.0605,
+      "object_missed": 0.0528,
+      "probable_missed": 0.3623,
+      "edge_chamfer": 0.2981,
+      "edge_coverage": 0.2382
+    },
+    "silhouette_iou": 0.637,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 3900,
+      "packed_images": 3,
+      "texture_sockets": [
+        "Base Color",
+        "Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 13,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "Table",
+    "input": "table_render.png",
+    "input_note": "synthetic Cycles render",
+    "budget": 2000,
+    "status": "ok",
+    "strategy": "template",
+    "category": "table",
+    "confidence": 0.508,
+    "triangles": 972,
+    "vertices": 864,
+    "meshes": 1,
+    "native_parts": 9,
+    "size_studs": [
+      5.0,
+      2.679,
+      2.857
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "normal",
+      "roughness"
+    ],
+    "seconds": 96.1,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 81.63,
+    "impact": {
+      "mean_deviation_percent": 0.028,
+      "p95_deviation_percent": 0.239,
+      "rating": "negligible"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": {
+      "background_overlap": 0.0126,
+      "object_missed": 0.0453,
+      "probable_missed": 0.0,
+      "edge_chamfer": 0.8139,
+      "edge_coverage": 0.0568
+    },
+    "silhouette_iou": 0.827,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 972,
+      "packed_images": 3,
+      "texture_sockets": [
+        "Base Color",
+        "Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 9,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "Vase",
+    "input": "vase_render.png",
+    "input_note": "synthetic Cycles render",
+    "budget": 3000,
+    "status": "ok",
+    "strategy": "revolve",
+    "category": "revolve",
+    "confidence": 0.854,
+    "triangles": 2852,
+    "vertices": 1822,
+    "meshes": 1,
+    "native_parts": 6,
+    "size_studs": [
+      1.306,
+      2.139,
+      1.307
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "roughness"
+    ],
+    "seconds": 89.8,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 23.13,
+    "impact": {
+      "mean_deviation_percent": 0.274,
+      "p95_deviation_percent": 0.525,
+      "rating": "negligible"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": null,
+    "silhouette_iou": 0.974,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 2852,
+      "packed_images": 2,
+      "texture_sockets": [
+        "Base Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 6,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "Plush",
+    "input": "plush_render.png",
+    "input_note": "synthetic render, PNG with alpha",
+    "budget": 5000,
+    "status": "ok",
+    "strategy": "inflate",
+    "category": "inflate",
+    "confidence": 0.742,
+    "triangles": 5000,
+    "vertices": 3043,
+    "meshes": 1,
+    "native_parts": 20,
+    "size_studs": [
+      1.891,
+      2.675,
+      1.083
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "normal",
+      "roughness"
+    ],
+    "seconds": 123.7,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 92.39,
+    "impact": {
+      "mean_deviation_percent": 0.851,
+      "p95_deviation_percent": 1.981,
+      "rating": "moderate"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": null,
+    "silhouette_iou": 0.924,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 5000,
+      "packed_images": 3,
+      "texture_sockets": [
+        "Base Color",
+        "Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 20,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "Emblem",
+    "input": "emblem_drawing.png",
+    "input_note": "flat drawing, Pillow",
+    "budget": 2000,
+    "status": "ok",
+    "strategy": "extrude",
+    "category": "extrude",
+    "confidence": 0.85,
+    "triangles": 1960,
+    "vertices": 3430,
+    "meshes": 1,
+    "native_parts": 1,
+    "size_studs": [
+      3.758,
+      3.565,
+      0.452
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "roughness"
+    ],
+    "seconds": 101.9,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 35.01,
+    "impact": {
+      "mean_deviation_percent": 0.166,
+      "p95_deviation_percent": 0.371,
+      "rating": "negligible"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": null,
+    "silhouette_iou": 0.988,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 1960,
+      "packed_images": 2,
+      "texture_sockets": [
+        "Base Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 1,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "Mug",
+    "input": "mug_front.png, mug_side.png, mug_back.png, mug_top.png",
+    "input_note": "four synthetic orthographic views",
+    "budget": 4000,
+    "status": "ok",
+    "strategy": "visual_hull",
+    "category": "visual_hull",
+    "confidence": 0.9,
+    "triangles": 4000,
+    "vertices": 2695,
+    "meshes": 1,
+    "native_parts": 23,
+    "size_studs": [
+      8.466,
+      5.934,
+      5.921
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "normal",
+      "roughness"
+    ],
+    "seconds": 51.0,
+    "peak_rss_mb": 1035.0,
+    "reduction_percent": 94.82,
+    "impact": {
+      "mean_deviation_percent": 0.383,
+      "p95_deviation_percent": 0.642,
+      "rating": "low"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": null,
+    "silhouette_iou": 0.978,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 4000,
+      "packed_images": 3,
+      "texture_sockets": [
+        "Base Color",
+        "Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 23,
+      "binary_equals_xml": true
+    }
+  },
+  {
+    "case": "ChairScan",
+    "input": "chair_turn_00.jpg, chair_turn_01.jpg, chair_turn_02.jpg, chair_turn_03.jpg, chair_turn_04.jpg, chair_turn_05.jpg, chair_turn_06.jpg, chair_turn_07.jpg",
+    "input_note": "eight unlabelled synthetic photos taken around the object",
+    "budget": 4000,
+    "status": "ok",
+    "strategy": "turntable",
+    "category": "turntable",
+    "confidence": 0.45,
+    "triangles": 4000,
+    "vertices": 5006,
+    "meshes": 1,
+    "native_parts": 12,
+    "size_studs": [
+      3.028,
+      5.485,
+      2.87
+    ],
+    "maps": [
+      "ambient_occlusion",
+      "basecolor",
+      "normal",
+      "roughness"
+    ],
+    "seconds": 52.7,
+    "peak_rss_mb": 976.0,
+    "reduction_percent": 89.47,
+    "impact": {
+      "mean_deviation_percent": 2.102,
+      "p95_deviation_percent": 5.737,
+      "rating": "high"
+    },
+    "validation_ok": true,
+    "watertight": true,
+    "warnings": [],
+    "fit": null,
+    "silhouette_iou": 0.688,
+    "blender_fbx": {
+      "objects": 1,
+      "triangles": 4000,
+      "packed_images": 3,
+      "texture_sockets": [
+        "Base Color",
+        "Color",
+        "Roughness"
+      ]
+    },
+    "rbxm_check": {
+      "ok": true,
+      "parts": 12,
+      "binary_equals_xml": true
+    }
+  }
+]

@@ -1,0 +1,10 @@
+discord.py==2.7.1
+numpy>=2.0,<3
+scipy>=1.13
+opencv-python-headless>=4.9,<5
+pillow>=10.1
+scikit-image>=0.23
+trimesh>=4.4
+fast-simplification>=0.1.9
+mapbox-earcut>=1.0
+pytest>=8
