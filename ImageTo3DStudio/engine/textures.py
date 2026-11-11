@@ -558,6 +558,8 @@ class PhotoProjection:
     pre: Optional[np.ndarray] = None
     wrap: bool = False
     relief: Optional[np.ndarray] = None
+    surround: Optional[object] = None
+    relief_back: Optional[np.ndarray] = None
 
 
 def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_verts: np.ndarray, all_faces: np.ndarray):
@@ -582,6 +584,8 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
         cam = view.camera
         if view.wrap:
             wpos = pos @ view.pre[:3, :3].T + view.pre[:3, 3] if view.pre is not None else pos
+            if view.surround is not None:
+                return view.surround.sample(wpos), np.ones(len(pos))
             xy, _, _ = cam.project(wpos)
             ih, iw = view.image_lin.shape[:2]
             return render.sample_image_xy(view.image_lin, np.stack([xy[:, 0] * iw / cam.width, xy[:, 1] * ih / cam.height], axis=1)), np.ones(len(pos))
@@ -636,6 +640,8 @@ def project_relief(texels: Texels, sel: np.ndarray, proj: PhotoProjection) -> Op
     pos = texels.pos[sel]
     if proj.pre is not None:
         pos = pos @ proj.pre[:3, :3].T + proj.pre[:3, 3]
+    if proj.surround is not None and proj.relief_back is not None:
+        return proj.surround.sample(pos, proj.relief, proj.relief_back)
     xy, _, _ = proj.camera.project(pos)
     ih, iw = proj.relief.shape[:2]
     return render.sample_image_xy(proj.relief[..., None], np.stack([xy[:, 0] * iw / proj.camera.width, xy[:, 1] * ih / proj.camera.height], axis=1))[:, 0]

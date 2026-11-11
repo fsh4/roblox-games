@@ -42,6 +42,14 @@ def smooth_outline(mask: np.ndarray, strength: float = 1.0) -> np.ndarray:
     return out
 
 
+def fill_outline(mask: np.ndarray) -> np.ndarray:
+    """The mask with every enclosed hole filled."""
+    m = mask.astype(np.uint8)
+    flood = np.pad(m, 1)
+    cv2.floodFill(flood, None, (0, 0), 2)
+    return (flood[1:-1, 1:-1] != 2)
+
+
 def flat_edge_share(mask: np.ndarray, side: str = "bottom") -> float:
     """Share of the widest row that the object's straight bottom (or top) edge covers."""
     m = mask if side == "bottom" else mask[::-1]

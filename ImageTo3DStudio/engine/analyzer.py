@@ -22,7 +22,7 @@ from PIL import Image, ImageOps
 Image.MAX_IMAGE_PIXELS = 64_000_000
 
 WORK_MAX_SIDE = 1024
-ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP", "BMP", "TIFF", "GIF"}
+ALLOWED_FORMATS = {"PNG", "JPEG", "MPO", "WEBP", "BMP", "TIFF", "GIF"}
 
 
 RNG_SEED = 0x5EED
@@ -77,9 +77,35 @@ def load_image(path: str, max_pixels: int = 40_000_000, max_side: int = WORK_MAX
         raise ImageValidationError("image rejected as a decompression bomb") from exc
     except Exception as exc:
         raise ImageValidationError(f"not a readable image ({exc.__class__.__name__})") from exc
+    arr = crop_letterbox(arr)
     rgb = arr[..., :3].copy()
     alpha = arr[..., 3].copy() if arr.shape[2] == 4 else None
     return LoadedImage(rgb, alpha, (w, h), fmt, focal)
+
+
+def crop_letterbox(arr: np.ndarray, limit: float = 0.3) -> np.ndarray:
+    """Remove flat black bars (letterbox / pillarbox) around a picture.
+
+    Bars confuse the backdrop model at the picture's edge. Only near-black,
+    perfectly flat rows and columns are removed, and never more than
+    ``limit`` of a side, so a dark studio backdrop that the object stands in
+    is kept.
+    """
+    rgb = arr[..., :3].astype(np.float32)
+    h, w = rgb.shape[:2]
+
+    def flat(lines: np.ndarray) -> np.ndarray:
+        return (lines.std(axis=(1, 2)) < 3.0) & (lines.mean(axis=(1, 2)) < 22.0)
+
+    rows = flat(rgb)
+    cols = flat(np.transpose(rgb, (1, 0, 2)))
+    top = int(np.argmin(rows)) if not rows.all() else 0
+    bottom = int(np.argmin(rows[::-1])) if not rows.all() else 0
+    left = int(np.argmin(cols)) if not cols.all() else 0
+    right = int(np.argmin(cols[::-1])) if not cols.all() else 0
+    if top + bottom > limit * h or left + right > limit * w or max(top, bottom, left, right) < 3:
+        return arr
+    return arr[top:h - bottom, left:w - right]
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +213,26 @@ def _rect_grabcut(small: np.ndarray, band: np.ndarray) -> np.ndarray:
     fg = (gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)
     fg = _largest_components(fg, 0.1)
     return cv2.erode(fg.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & ~band
+
+
+def edge_contact(mask: np.ndarray, band: int = 2) -> float:
+    """Share of the picture's edge pixels covered by the mask."""
+    edge = np.concatenate([mask[:band].ravel(), mask[-band:].ravel(), mask[:, :band].ravel(), mask[:, -band:].ravel()])
+    return float(edge.mean())
+
+
+def _centre_cut(small: np.ndarray, iterations: int = 6) -> np.ndarray:
+    """Graph cut seeded with a centred rectangle; for objects in front of a busy scene."""
+    sh, sw = small.shape[:2]
+    gc = np.zeros((sh, sw), np.uint8)
+    rect = (int(sw * 0.05), int(sh * 0.05), int(sw * 0.9), int(sh * 0.9))
+    try:
+        cv2.grabCut(small, gc, rect, np.zeros((1, 65)), np.zeros((1, 65)), iterations, cv2.GC_INIT_WITH_RECT)
+    except cv2.error:
+        return np.zeros((sh, sw), bool)
+    fg = (gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)
+    fg = cv2.morphologyEx(fg.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)).astype(bool)
+    return _largest_components(fg, 0.15)
 
 
 def peel_cast_shadow(lab: np.ndarray, fg: np.ndarray, bg_centers: np.ndarray, reach: float = 0.07) -> np.ndarray:
@@ -328,6 +374,15 @@ def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = 
     def up(m):
         return cv2.resize(m.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) if scale < 1 else m.astype(np.uint8)
 
+    contact = edge_contact(fg)
+    if not plain and contact > 0.08:
+        alt = _centre_cut(small)
+        alt_contact = edge_contact(alt)
+        if alt.sum() > 0.02 * sh * sw and alt_contact < 0.5 * contact:
+            fg = alt
+            zones = np.where(alt, 2, np.where(cv2.dilate(alt.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0, 1, 0)).astype(np.uint8)
+            method = "centred graph cut (busy background)"
+            notes.append("The background is busy: the object was taken from the middle of the picture. A plain background gives a cleaner cut-out.")
     if plain or spread < 14.0:
         peeled = peel_cast_shadow(lab, fg, centers)
         if peeled.sum() < fg.sum():

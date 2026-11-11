@@ -121,6 +121,11 @@ can open or edit a project.
   the depth afterwards with `/3d edit` > Size.
 - Uploading the same photo twice does not help: repeats are ignored, and
   fewer than four unlabelled photos are treated as one photo.
+- The unseen back is textured from the materials of the photo (cake layers
+  continue, fur stays fur) without copying unique details such as eyes or a
+  logo. Holes you can see through (a mug handle) stay holes.
+- A busy background (a street, a room) is handled, but the object alone on a
+  plain background always gives the best model.
 
 ## Importing into Roblox Studio
 

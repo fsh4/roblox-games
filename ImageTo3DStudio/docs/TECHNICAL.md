@@ -65,7 +65,19 @@ Restore = new version with an old version's settings (non-destructive).
   by orientation, CIELAB palette, a "drawing-likeness" score (flat colour,
   dark outline, saturation) and a width profile.
 
-## Reconstruction (engine/reconstruction.py, engine/fitting.py, engine/sculpt.py)
+## Busy pictures (engine/analyzer.py)
+
+- **Letterbox bars**: flat near-black rows and columns at the edges (mean
+  below 22, spread below 3) are cropped on loading, at most 30 % per axis.
+- **Busy background**: when the cut-out covers more than 8 % of the picture's
+  edge on a non-plain backdrop, a second graph cut seeded with a centred
+  rectangle is tried; it replaces the first when it touches the edge less
+  than half as much. Tested on five street and nature photos: the first cut
+  took the trees or the hillside, the second the car, the elephant, the
+  tiger and the lion.
+- **MPO** (the JPEG variant many phones and cameras write) is accepted.
+
+## Reconstruction (engine/reconstruction.py, engine/fitting.py, engine/sculpt.py, engine/surround.py)
 
 ### Strategy selection
 Templates are only candidates when the outline has straight edges. The
@@ -77,6 +89,13 @@ template is fitted at all. Measured: egg photo 0.00, plush 0.00, bed photo
 0.29, chair 0.65, table 0.74, emblem 0.90. Before this gate a box-shaped
 template covered any compact blob well enough to be accepted (the decorated
 egg scored 0.63 as a bookshelf).
+
+Templates are also skipped when the cut-out runs along more than 25 % of the
+picture's edge (it has swallowed the surroundings), and a silhouette with a
+see-through opening only tries the templates that have gaps (chair, table,
+shelf, bed). A refined fit is rejected when more than 16 % of the template
+covers background (`TEMPLATE_MAX_SPILL`); the bed photo needs 11 %, the
+chair 6 %, the table 1 %, and a photo of two cars that fitted a sofa 22 %.
 
 Otherwise `rank_categories` scores categories from the features; the six best
 templates are fitted coarsely. The two best coarse fits plus the best
@@ -160,6 +179,44 @@ largest visible flat face is perspective-rectified into an exemplar patch.
   `H2` is stored with the spec; an edit never recomputes it. Reconstructions
   saved before this model (no `inflate_model` in the spec) still build with
   the old `sqrt(d/dmax)` profile.
+- **See-through openings** (inflate): holes in the silhouette that show the
+  backdrop are kept (a mug handle, a ring). The hole test weighs lightness
+  at 0.12 instead of 0.55, so a shadow on the backdrop inside the hole still
+  counts as backdrop. A silhouette with such an opening is never revolved.
+- **Synthesised back** (`engine/surround.py`, inflate and revolve): the
+  surface is described per image row by an axis, a half width `a` (outline)
+  and a half depth `b` (thickness map, or `a` for a lathe), and every point
+  by its azimuth (0 = facing the camera, 180 = back). On the front the
+  azimuth comes from the photo column (`sin(theta) = u`), towards the sides
+  it changes over to the geometric angle around the row's ellipse, so it is
+  continuous across the outline.
+  1. Camera elevation: seen from above, a horizontal ring of the object lies
+     lower in the photo at the front than at the sides, by
+     `b * sin(elevation) * cos(theta)`. Thirteen candidates from 0 to 37
+     degrees are tried; the one whose unwrapped strip has the straightest
+     rows (lowest spread of lightness along each row) wins, and a level
+     camera is kept unless a candidate is at least 4 % better. The egg photo
+     gives 26.7 degrees.
+  2. The front from -75 to 75 degrees is unwrapped along those rings into a
+     strip, and its lighting (Gaussian-blurred brightness, sigma 1/10 of the
+     strip) is divided out.
+  3. Image quilting (Efros and Freeman 2001) fills 60 to 300 degrees at
+     about 160 rows: patches of 28 px with 9 px overlap, from the strip and
+     its mirror image, from rows within 3.5 % of the target row (with a
+     quadratic penalty on the offset), joined by minimum-error boundary cuts.
+     The bands 60-75 and 285-300 degrees are copied unchanged and the quilt
+     must join them. Penalties: colour regions narrower than 55 % of the
+     strip are details (k-means in CIELAB, 8 clusters, region width), a
+     patch with more than 8 % detail pixels is excluded, and a source
+     position already used nearby costs extra, so nothing is stamped twice
+     in a row.
+  4. The placement is replayed at full resolution, and the back is re-lit
+     smoothly from the photo's lighting at one join band, through the row's
+     median, to the other.
+  Texels with an azimuth up to 64 degrees take the photo directly, beyond 74
+  degrees the synthesised back, with a smooth blend between. The relief map
+  is computed for both. If synthesis is not possible the mirrored back is
+  used.
 - **Wrap projection** (inflate): every texel of the solid, front or back,
   lies behind one object pixel of the orthographic photo, so the colour is
   looked up directly, without visibility or facing weights; nothing is left

@@ -36,6 +36,10 @@ the evidence column says which.
 | Surface of revolution (vases, bottles, lamps) | Done + tested | Vase, chosen automatically |
 | Extrusion of flat artwork with holes | Done + tested | Emblem, chosen automatically, centre hole kept |
 | Free-form objects: medial-ball inflation, flat base, wrap projection, photo relief | Done + tested | Egg photo and plush, chosen automatically; `tests/test_sculpt.py` (disc gives a sphere within 12 % volume, thin parts stay thin) |
+| Synthesised back (camera elevation, lighting-free quilting, no copied details) | Done + tested | `tests/test_surround.py`: elevation of the egg photo found (15-40 degrees), back differs from the mirrored front, azimuth continuous on the body; egg, plush, vase, donut and mug samples checked from four sides |
+| See-through openings kept (handles, rings) | Done + tested | `test_see_through_hole_is_kept`: donut mesh has exactly one hole |
+| Busy backgrounds and letterboxed pictures | Done, not fully tested | `test_letterbox_bars_are_removed`; centred graph cut checked by eye on five street and nature photos (not in the repository) |
+| Template fits that spill onto the background are rejected | Done, not fully tested | Two-car photo no longer becomes a sofa; no automated test |
 | Templates only for outlines with straight edges | Done + tested | `test_decorated_egg_is_not_furniture`: no template is tried on the egg photo |
 | Repeated or too few unlabelled photos fall back to one photo | Done + tested | `test_repeated_photo_does_not_start_a_photo_set` |
 | Visual hull from labelled views (front/side/back/left/top) | Done + tested | Mug from 4 views |

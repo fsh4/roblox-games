@@ -203,3 +203,28 @@ photos other than the egg and the plush render. Known limits of this mode: the
 back is a mirror of the front (a face appears on both sides), a photo taken at
 an angle is treated as a straight-on view, and parts that overlap in the photo
 are not separated in depth.
+
+## Update 2026-11-11 (second pass): any picture, synthesised back
+
+Owner feedback: the back of the egg looked like two pictures glued together
+(it was a mirror of the front), and any picture should give a sensible model.
+
+| Check | Before | After |
+|---|---|---|
+| Back of the egg | mirror of the front, fold at the outline | layers continue around the object, no strawberry or face copied; camera elevation found at 26.7 degrees |
+| Back of the plush | mirror (eyes on both sides) | plain fur, eyes not copied |
+| Vase, donut, mug backs | mirror / blotches from the photo's lighting | smooth, re-lit, no blotches |
+| Donut and mug handle | hole filled (donut became a lathe ball) | hole kept (Euler characteristic 0 tested) |
+| Shadow inside a hole | grey patch on the inner wall | treated as background |
+| Letterboxed street photo (car) | the trees were cut out and fitted as a sofa | bars cropped, centred cut takes the car |
+| Hillside photo (car) | grass and house cut out | the car |
+| Two-car photo | sofa template (22 % on background) | template rejected, rounded solid |
+| Phone photos in MPO format | rejected as unsupported | accepted |
+
+Photos used for the busy-background checks are public examples from the
+rembg repository (street, nature, food) and are not stored here. Mug and
+donut are drawn by `tools/make_shapes.py`.
+
+Not checked: Roblox Studio import of the new packages, photos of people or
+characters with arms in front of the body (parts that overlap in the photo
+are still one solid).

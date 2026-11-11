@@ -30,8 +30,9 @@ from . import analyzer as an
 from . import geometry as g
 from . import render
 from . import sculpt
+from . import surround
 from .fitting import FitTarget, View, count_repeats, fit_template, label_map, make_target, scaled_view
-from .materials import MaterialSpec, infer_kind, make_material, srgb_to_linear
+from .materials import MaterialSpec, infer_kind, linear_to_srgb, make_material, srgb_to_linear
 from .procedural import LOD, TEMPLATES, Template, get_template, m2s
 from .scene import NativePrimitive, Part, Scene
 from .textures import PhotoProjection
@@ -56,6 +57,9 @@ TEMPLATE_MIN_STRAIGHTNESS = 0.15
 # off-axis (a handle, a cone leaning on top) turns into a ring. Only clearly
 # mirror-symmetric outlines are revolved.
 LATHE_MIN_SYMMETRY = 0.935
+# A fitted template may not cover more than this share of background: a
+# template that only fits by spilling over the backdrop is the wrong object.
+TEMPLATE_MAX_SPILL = 0.16
 
 CATEGORY_TEMPLATES = {
     "bed": "bed", "chair": "chair", "stool": "chair", "table": "table", "desk": "table",
@@ -441,7 +445,7 @@ def reconstruct_revolve(src: Source, height_studs: float) -> Reconstruction:
         "dimensions": [float(2 * r.max() * k), float(height_studs), float(2 * r.max() * k)],
         "camera": _front_camera(src, k, (axis, y1)),
         "confidence": round(0.5 + 0.5 * src.features.symmetry * src.seg.confidence, 3),
-        "notes": ["Rotationally symmetric object: the profile was revolved around the vertical axis; the back is a mirror of the front photo."],
+        "notes": ["Rotationally symmetric object: the profile was revolved around the vertical axis; the unseen back is textured from the materials of the front."],
         "photo_projection": True,
     }
     return Reconstruction(spec, {"profile": profile})
@@ -484,15 +488,18 @@ def reconstruct_inflate(src: Source, height_studs: float, depth_scale: float = 1
     k = _px_to_studs(src, height_studs)
     cx = (x0 + x1) / 2.0
     width = (x1 - x0 + 1) * k
-    mask = sculpt.smooth_outline(src.seg.filled)[y0:y1 + 1, x0:x1 + 1]
+    mask = sculpt.smooth_outline(open_silhouette(src))[y0:y1 + 1, x0:x1 + 1]
     flat_base = sculpt.flat_edge_share(mask, "bottom") >= sculpt.FLAT_SHARE
     flat_top = sculpt.flat_edge_share(mask, "top") >= 0.6
     h2, _ = sculpt.thickness_field(mask, flat_base, flat_top)
     depth = 2.0 * float(np.sqrt(max(h2.max(), 0.0))) * height_studs / max(h2.shape[0], 1) * depth_scale
     notes = ["Free-form object: the silhouette was inflated into a rounded solid (every part is as deep as it is wide in the photo). "
-             "The back is estimated as a mirror of the front."]
+             "The unseen back is textured from the materials of the front (patch synthesis), without copying its unique details."]
     if flat_base:
         notes.append("A straight bottom edge was found, so the model stands on a flat base.")
+    openings = int(cv2.connectedComponents((~mask & sculpt.fill_outline(mask)).astype(np.uint8))[0] - 1)
+    if openings:
+        notes.append(f"{openings} see-through opening{'s were' if openings > 1 else ' was'} kept as a hole through the model.")
     spec = {
         "strategy": "inflate", "category": "inflate", "inflate_model": "balls",
         "dimensions": [float(width), float(height_studs), float(depth)],
@@ -588,7 +595,29 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
     return Reconstruction(spec, {"occupancy": occ.astype(np.uint8), "field": _store_field(field_vol, step)})
 
 
-def carving_silhouette(src: Source) -> np.ndarray:
+def open_silhouette(src: Source) -> np.ndarray:
+    """Silhouette with its see-through holes kept (a mug handle, a ring, a gap between arms).
+
+    With an alpha matte every transparent hole of a reasonable size is real;
+    otherwise only holes that show the background colour are opened.
+    """
+    seg = src.seg
+    if seg.method != "alpha matte":
+        # Shadow inside a hole has the backdrop's hue but is darker, so
+        # lightness counts little here; a free-form solid has no thin slats
+        # that a wrongly opened pixel could cut.
+        return carving_silhouette(src, light_weight=0.12)
+    sil = seg.filled.copy()
+    holes = seg.filled & ~seg.mask
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), connectivity=4)
+    min_area = 0.002 * float(seg.filled.sum())
+    for i in range(1, count):
+        if stats[i, cv2.CC_STAT_AREA] >= min_area:
+            sil &= labels != i
+    return sil
+
+
+def carving_silhouette(src: Source, light_weight: float = 0.55) -> np.ndarray:
     """Silhouette for carving: holes filled, except gaps that show the background.
 
     Gaps between chair-back slats or inside a mug handle stay open when the
@@ -602,7 +631,7 @@ def carving_silhouette(src: Source) -> np.ndarray:
     if not holes.any() or not len(seg.background_lab):
         return sil
     lab = cv2.cvtColor(src.image.rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
-    wts = np.array([0.55, 1.0, 1.0], np.float32)
+    wts = np.array([light_weight, 1.0, 1.0], np.float32)
     count, labels = cv2.connectedComponents(holes.astype(np.uint8))
     min_area = 0.002 * float(seg.filled.sum())
     for i in range(1, count):
@@ -887,6 +916,16 @@ def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolu
 # ---------------------------------------------------------------------------
 
 MIN_PHOTO_SET = 4
+# A cut-out that runs along this share of the picture's edge has swallowed the
+# surroundings (a street, a room): templates would only fit the scene.
+SCENE_EDGE_SHARE = 0.25
+# Templates whose real objects have see-through gaps; the others are closed
+# solids and cannot explain a hole in the silhouette (a mug handle).
+OPEN_TEMPLATES = ("chair", "table", "shelf", "bed")
+
+
+def border_contact(mask: np.ndarray, band: int = 2) -> float:
+    return an.edge_contact(mask, band)
 MIN_ORBIT_DEGREES = 75.0
 
 
@@ -977,13 +1016,20 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
         report("comparing object templates", 0.08)
         target = make_target(src.image, src.seg)
         f = src.features
-        lathe_like = f.symmetry > LATHE_MIN_SYMMETRY and f.row_convexity > 0.95
+        see_through = bool((src.seg.filled & ~open_silhouette(src)).sum() > 0.002 * src.seg.filled.sum())
+        edge_share = border_contact(src.seg.filled)
+        scene_like = src.seg.method != "alpha matte" and edge_share > SCENE_EDGE_SHARE
+        if scene_like:
+            notes.append(f"The cut-out touches {edge_share:.0%} of the picture's edge, so the object was probably not separated from its surroundings. "
+                         "No furniture or building template was tried. For a good model, photograph the object alone with some plain background around it.")
+        lathe_like = f.symmetry > LATHE_MIN_SYMMETRY and f.row_convexity > 0.95 and not see_through
         organic = f.solidity > 0.8 and _straightness(f) < 0.5
         free_form = f.outline_straightness < TEMPLATE_MIN_STRAIGHTNESS
         # The lamp template is itself a lathe shape: a revolve reproduces lathe-like
         # silhouettes exactly, and other silhouettes cannot be lamps.
-        candidates = [] if free_form else [c for c, _ in ranking if c in TEMPLATES and c != "box"
-                                           and not (c == "lamp" and (lathe_like or f.row_convexity < 0.9))][:6]
+        candidates = [] if (free_form or scene_like) else [c for c, _ in ranking if c in TEMPLATES and c != "box"
+                                                           and not (c == "lamp" and (lathe_like or f.row_convexity < 0.9))
+                                                           and not (see_through and c not in OPEN_TEMPLATES)][:6]
         coarse = []
         for c in candidates:
             res = fit_template(get_template(c), target, coarse_only=True)
@@ -1000,8 +1046,12 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
         for i, (cs, c) in enumerate((coarse_by[c], c) for c in shortlist):
             report(f"testing {c} template", 0.09 + 0.02 * i)
             res = fit_template(get_template(c), target, max_evals=170)
+            spill = float(res.components.get("background_overlap", 0.0))
+            alternatives.append({"template": c, "coarse_score": round(cs, 4), "refined_score": round(res.score, 4), "background_overlap": round(spill, 3)})
+            if spill > TEMPLATE_MAX_SPILL:
+                notes.append(f"The {c} template was rejected: {spill:.0%} of it would cover background.")
+                continue
             scored.append((res.score, c))
-            alternatives.append({"template": c, "coarse_score": round(cs, 4), "refined_score": round(res.score, 4)})
         scored.sort()
         accept = LATHE_TEMPLATE_SCORE if lathe_like else ORGANIC_TEMPLATE_SCORE if organic else TEMPLATE_ACCEPT_SCORE
         if scored and scored[0][0] < accept:
@@ -1014,6 +1064,8 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
             chosen = "inflate"
         if scored:
             notes.append(f"Detected category: {chosen} (template scores: " + ", ".join(f"{c} {s:.2f}" for s, c in scored) + ").")
+        elif scene_like:
+            notes.append(f"Detected category: {chosen} (cut-out not separated from the surroundings).")
         else:
             notes.append(f"Detected category: {chosen} (curved outline, {f.outline_straightness:.0%} straight edges: furniture and building templates were not considered).")
     report(f"reconstructing as {chosen}", 0.15)
@@ -1289,7 +1341,18 @@ def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene, ar
             extended = sculpt.extend_colours(src.image.rgb, inside)
             img = srgb_to_linear(extended.astype(np.float64) / 255.0)
             relief = sculpt.photo_relief(extended, inside, spec["dimensions"][1])
-            return PhotoProjection(img, cam, None, mirror_axis=2, mirror_center=0.0, wrap=True, relief=relief)
+            proj = PhotoProjection(img, cam, None, mirror_axis=2, mirror_center=0.0, wrap=True, relief=relief)
+            if arrays and "thickness" in arrays and spec.get("back_texture", "synthesised") == "synthesised":
+                _attach_surround(proj, img, inside, np.asarray(arrays["thickness"], dtype=np.float64), cam, ppm, spec)
+            return proj
+        if strategy == "revolve" and spec.get("back_texture", "synthesised") == "synthesised":
+            inside = sculpt.smooth_outline(src.seg.filled)
+            extended = sculpt.extend_colours(src.image.rgb, inside)
+            img = srgb_to_linear(extended.astype(np.float64) / 255.0)
+            relief = sculpt.photo_relief(extended, inside, spec["dimensions"][1])
+            proj = PhotoProjection(img, cam, None, mirror_axis=2, mirror_center=0.0, wrap=True, relief=relief)
+            if _attach_surround(proj, img, inside, None, cam, ppm, spec):
+                return proj
         img = srgb_to_linear(src.image.rgb.astype(np.float64) / 255.0)
         return PhotoProjection(img, cam, src.seg.mask.astype(np.uint8), mirror_axis=2, mirror_center=0.0)
     if strategy == "template":
@@ -1339,6 +1402,18 @@ def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene, ar
         first.extra = views[1:]
         return first
     return None
+
+
+def _attach_surround(proj: PhotoProjection, img: np.ndarray, inside: np.ndarray, h2: Optional[np.ndarray], cam, ppm: float, spec: dict) -> bool:
+    """Give a wrap projection a synthesised back; keeps the mirrored back if synthesis is not possible."""
+    try:
+        sur = surround.build_surround(img, inside, h2, cam, ppm, float(spec.get("depth_scale", 1.0)) if h2 is not None else 1.0)
+    except (ValueError, IndexError, cv2.error):
+        return False
+    back_srgb = (np.clip(linear_to_srgb(sur.back), 0, 1) * 255).astype(np.uint8)
+    proj.surround = sur
+    proj.relief_back = sculpt.photo_relief(back_srgb, np.ones(back_srgb.shape[:2], bool), spec["dimensions"][1])
+    return True
 
 
 def _view_camera(bounds: np.ndarray, view: View, w: int, h: int) -> render.Camera:
