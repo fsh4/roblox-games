@@ -112,20 +112,24 @@ def decimate_mesh(mesh: g.Mesh, target: int, smooth_angle: float = 40.0) -> g.Me
     good = (tris[:, 0] != tris[:, 1]) & (tris[:, 1] != tris[:, 2]) & (tris[:, 0] != tris[:, 2])
     tris = tris[good].astype(np.int64)
     best = None
+    fallback = None
     # Aggressive collapses can pinch thin parts (chair slats) into edges shared
     # by more than two triangles. Retry gentler or slightly lower targets and
-    # keep the first manifold result within the budget.
+    # keep the first manifold result within the budget; if no attempt fits,
+    # keep the smallest one.
     for agg, scale in ((7.0, 1.0), (5.0, 1.0), (7.0, 0.97), (5.0, 0.97), (7.0, 0.93), (5.0, 0.93), (3.0, 0.9)):
         out_pts, out_tris = fast_simplification.simplify(pts, tris, target_count=max(4, int(target * scale)), agg=agg)
         out = _drop_bad_faces(g.Mesh(out_pts, out_tris, None, np.zeros((len(out_pts), 2)), None, mesh.name))
+        defects = _topology_defects(out.faces)
+        if fallback is None or (out.triangle_count, defects) < (fallback[1].triangle_count, fallback[0]):
+            fallback = (defects, out)
         if out.triangle_count > target:
             continue
-        defects = _topology_defects(out.faces)
         if best is None or defects < best[0]:
             best = (defects, out)
         if defects == 0:
             break
-    out = best[1] if best is not None else out
+    out = (best or fallback)[1]
     if _topology_defects(out.faces):
         out.vertices, out.faces = split_pinches(out.vertices, out.faces)
         out.uvs = np.zeros((len(out.vertices), 2))
