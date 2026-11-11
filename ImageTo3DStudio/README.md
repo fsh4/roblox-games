@@ -115,6 +115,12 @@ can open or edit a project.
   calibrated from their silhouettes under that assumption.
 - A flat drawing or logo (flat colours, outline) is extruded into a solid
   emblem; holes in it are kept.
+- Toys, food, characters and other free-form props become a rounded solid:
+  every part is as deep as it is wide in the photo, the photo is wrapped
+  around it and mirrored onto the back. A straight-on view works best; change
+  the depth afterwards with `/3d edit` > Size.
+- Uploading the same photo twice does not help: repeats are ignored, and
+  fewer than four unlabelled photos are treated as one photo.
 
 ## Importing into Roblox Studio
 

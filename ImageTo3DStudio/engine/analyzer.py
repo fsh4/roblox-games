@@ -189,6 +189,38 @@ def _rect_grabcut(small: np.ndarray, band: np.ndarray) -> np.ndarray:
     return cv2.erode(fg.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & ~band
 
 
+def peel_cast_shadow(lab: np.ndarray, fg: np.ndarray, bg_centers: np.ndarray, reach: float = 0.07) -> np.ndarray:
+    """Remove a shadow that the graph cut attached to the foot of the object.
+
+    On a plain backdrop a cast shadow has the backdrop's chroma and is only
+    darker. Such pixels are peeled off layer by layer from the outline inwards,
+    in the lower part of the object and no deeper than ``reach`` of its size,
+    so a dark object of the backdrop's hue is never eaten.
+    """
+    ys, xs = np.nonzero(fg)
+    if len(ys) < 50:
+        return fg
+    y0, y1 = ys.min(), ys.max()
+    size = max(y1 - y0 + 1, xs.max() - xs.min() + 1)
+    bg = bg_centers[np.argmax(bg_centers[:, 0])].astype(np.float32)
+    chroma_d = np.linalg.norm(lab[..., 1:] - bg[1:], axis=2)
+    ratio = lab[..., 0] / max(float(bg[0]), 1.0)
+    rows = np.arange(lab.shape[0])[:, None]
+    shadow_like = (chroma_d < 5.0) & (ratio > 0.3) & (ratio < 0.97) & (rows > y0 + 0.6 * (y1 - y0))
+    out = fg.copy()
+    kernel = np.ones((3, 3), np.uint8)
+    for _ in range(max(1, int(round(reach * size)))):
+        rim = out & ~(cv2.erode(out.astype(np.uint8), kernel) > 0)
+        drop = rim & shadow_like
+        if not drop.any():
+            break
+        out &= ~drop
+    if out.sum() < 0.8 * fg.sum():
+        return fg
+    out = cv2.morphologyEx(out.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)).astype(bool)
+    return _largest_components(out, 0.06)
+
+
 def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = None) -> Segmentation:
     # Graph cut and k-means draw from OpenCV's global RNG; a fixed seed makes the
     # cut-out of a photo identical no matter what ran earlier in the process.
@@ -296,6 +328,11 @@ def segment(img: LoadedImage, sensitivity: float = 0.5, debug: Optional[dict] = 
     def up(m):
         return cv2.resize(m.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) if scale < 1 else m.astype(np.uint8)
 
+    if plain or spread < 14.0:
+        peeled = peel_cast_shadow(lab, fg, centers)
+        if peeled.sum() < fg.sum():
+            notes.append("A cast shadow next to the object was removed from the cut-out.")
+            fg = peeled
     mask = up(fg).astype(bool)
     zones_full = up(zones)
     filled = fill_holes(mask)
@@ -338,6 +375,7 @@ class Features:
     contour: np.ndarray
     width_profile: np.ndarray
     row_convexity: float = 1.0
+    outline_straightness: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -347,6 +385,7 @@ class Features:
             "vertical_lines": self.vertical_lines, "horizontal_lines": self.horizontal_lines,
             "oblique_lines": self.oblique_lines, "line_length_ratio": round(float(self.line_length_ratio), 4),
             "color_count": self.color_count, "drawing_likeness": round(self.drawing_likeness, 4), "row_convexity": round(self.row_convexity, 4),
+            "outline_straightness": round(self.outline_straightness, 4),
             "palette": [{"color": [round(c, 4) for c in col], "share": round(s, 4)} for col, s in self.palette],
         }
 
@@ -448,7 +487,29 @@ def compute_features(img: LoadedImage, seg: Segmentation) -> Features:
         (x0, y0, x1, y1), bw / max(bh, 1), area / (bw * bh), area / max(hull_area, 1.0),
         float(holes.sum()) / max(area, 1.0), hole_count, sym, axis, area / max(rect_area, 1.0),
         v, h_, o, total_len / max(bw + bh, 1), significant, pal, drawing, cnt.reshape(-1, 2), prof, row_convexity,
+        outline_straightness(cnt),
     )
+
+
+def outline_straightness(contour: np.ndarray) -> float:
+    """Share of the outline made of long straight runs (0 = all curves, 1 = polygon).
+
+    Furniture, buildings and boxes are bounded by straight edges; fruit, toys,
+    characters and most free-form props are bounded by curves. The outline is
+    simplified to a polygon within a tight tolerance: a curve breaks into many
+    short sides, a straight edge survives as one long side.
+    """
+    pts = contour.reshape(-1, 1, 2).astype(np.float32)
+    perimeter = float(cv2.arcLength(pts, True))
+    if perimeter <= 0:
+        return 0.0
+    x, y, w, h = cv2.boundingRect(pts)
+    diag = float(np.hypot(w, h))
+    poly = cv2.approxPolyDP(pts, 0.006 * diag, True).reshape(-1, 2)
+    if len(poly) < 2:
+        return 0.0
+    sides = np.linalg.norm(np.roll(poly, -1, axis=0) - poly, axis=1)
+    return float(sides[sides >= 0.16 * diag].sum() / perimeter)
 
 
 def drawing_score(rgb: np.ndarray, gray: np.ndarray, mask: np.ndarray, filled: np.ndarray) -> float:

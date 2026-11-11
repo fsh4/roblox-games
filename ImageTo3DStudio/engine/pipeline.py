@@ -35,7 +35,7 @@ STRATEGY_LABELS = {
     "template": "Mode C - procedural object reconstruction (fitted template)",
     "revolve": "Mode A - single image, surface of revolution",
     "extrude": "Mode A - single image, extruded outline",
-    "inflate": "Mode A - single image, inflated silhouette",
+    "inflate": "Mode A - single image, rounded solid from the silhouette",
     "visual_hull": "Mode B - multiple labelled views, visual hull",
     "turntable": "Mode B - photo set, recovered camera yaw + visual hull",
 }
@@ -73,7 +73,7 @@ def analyse_project(project_dir: str, image_paths: Sequence[str], mode: str = "a
     for i, s in enumerate(sources):
         Image.fromarray((s.seg.mask * 255).astype(np.uint8)).save(os.path.join(source, f"mask_{i}.png"))
         Image.fromarray((s.seg.zones * 120).astype(np.uint8)).save(os.path.join(source, f"zones_{i}.png"))
-    rec.spec["images"] = [os.path.basename(p) for p in image_paths]
+    rec.spec["images"] = [os.path.basename(s.path) for s in sources]
     rec.spec["view_labels"] = [s.view_label for s in sources]
     rc.save_reconstruction(rec, source)
     return rec.spec
@@ -218,7 +218,7 @@ def build_version(project_dir: str, version_dir: str, spec: dict, arrays: Dict[s
     photo = None
     if spec.get("photo_projection"):
         sources = _light_sources(project_dir, spec)
-        photo = rc.photo_projection_for(spec, sources, scene)
+        photo = rc.photo_projection_for(spec, sources, scene, arrays)
         if photo is not None:
             base = _base_extent(spec, arrays)
             final = hi_before - lo_before

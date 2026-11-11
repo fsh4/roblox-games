@@ -282,7 +282,7 @@ class EditPanel(discord.ui.View):
         elif key == "shape":
             spec = svc.read_spec(self.pid) or {}
             if spec.get("strategy") != "template":
-                await svc.reply(interaction, content="Shape parameters exist for template reconstructions (furniture, buildings, vehicles). Use Size and scale here.", ephemeral=True)
+                await svc.reply(interaction, content="Shape parameters exist for template reconstructions (furniture, buildings, vehicles). For this model use Size and scale: the three sizes are width, height and depth, so a flatter or deeper body is set there.", ephemeral=True)
                 return
             await svc.reply(interaction, content="Choose a parameter:", view=ParamPicker(self.pid, self.ver, s, spec), ephemeral=True)
         elif key == "lower":

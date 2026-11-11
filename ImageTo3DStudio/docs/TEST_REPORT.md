@@ -178,3 +178,28 @@ python tools/quality_report.py --blender /path/to/bpy-venv/bin/python --rbxcheck
 
 `tools/quality_report.py` writes `docs/quality_report.json` (all numbers in
 the tables above) and the sample packages in `samples/`.
+
+## Update 2026-11-11: free-form objects
+
+Reported failure: a picture of a decorated dessert egg came out once as a
+bookshelf (template fit accepted with score 0.63) and once as a long prism
+(the photo-set mode carved a volume from repeated photos).
+
+| Check | Before | After |
+|---|---|---|
+| Egg photo, automatic strategy | `template` (shelf) | `inflate`, no template tried (outline 0 % straight) |
+| Egg photo uploaded twice | photo-set carving, prism | repeat ignored, same result as one photo |
+| Egg model | flat board with shelves | rounded solid 1.65 x 2.68 x 1.69 studs, 5,000 triangles, watertight, 0 validation warnings |
+| Outline pixels showing the backdrop | brown and grey band around the rim | none (wrap projection, colours extended inwards) |
+| Analysis time for the egg | 43.8 s (template fitting) | 1.0 s |
+| Whole job (analysis, 1024 px textures, all exports) | not finished correctly | 30 s |
+
+Test suite: 85 passed, 1 skipped (the Blender cross-check, Blender is not
+installed on this machine), 9 min 45 s. New tests are in
+`tests/test_sculpt.py`.
+
+Not checked: import of the new egg package into Roblox Studio, and free-form
+photos other than the egg and the plush render. Known limits of this mode: the
+back is a mirror of the front (a face appears on both sides), a photo taken at
+an angle is treated as a straight-on view, and parts that overlap in the photo
+are not separated in depth.

@@ -556,6 +556,8 @@ class PhotoProjection:
     weight_floor: float = 0.12
     extra: List["PhotoProjection"] = field(default_factory=list)
     pre: Optional[np.ndarray] = None
+    wrap: bool = False
+    relief: Optional[np.ndarray] = None
 
 
 def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_verts: np.ndarray, all_faces: np.ndarray):
@@ -565,6 +567,10 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
     map rendered from that camera) and faces the camera. Hidden texels fall back
     to the mirror image across the symmetry plane. Contributions are blended with
     the fourth power of their weight so the most frontal view dominates.
+
+    A ``wrap`` projection belongs to a solid built from that very silhouette
+    with an orthographic camera: every texel, front or back, lies behind one
+    object pixel, so the photo is looked up directly and nothing is left bare.
     """
     pos = texels.pos[sel]
     nrm = texels.nrm[sel]
@@ -574,6 +580,11 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
     diam = float(np.linalg.norm(all_verts.max(0) - all_verts.min(0)))
     for view in [proj] + list(proj.extra):
         cam = view.camera
+        if view.wrap:
+            wpos = pos @ view.pre[:3, :3].T + view.pre[:3, 3] if view.pre is not None else pos
+            xy, _, _ = cam.project(wpos)
+            ih, iw = view.image_lin.shape[:2]
+            return render.sample_image_xy(view.image_lin, np.stack([xy[:, 0] * iw / cam.width, xy[:, 1] * ih / cam.height], axis=1)), np.ones(len(pos))
         if view.pre is not None:
             mv = all_verts @ view.pre[:3, :3].T + view.pre[:3, 3]
             vpos = pos @ view.pre[:3, :3].T + view.pre[:3, 3]
@@ -616,6 +627,18 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
             conf = np.maximum(conf, wgt)
     color = num / np.maximum(den, 1e-12)[:, None]
     return color, conf
+
+
+def project_relief(texels: Texels, sel: np.ndarray, proj: PhotoProjection) -> Optional[np.ndarray]:
+    """Height offsets (studs) for the selected texels from a wrap projection's relief image."""
+    if not proj.wrap or proj.relief is None:
+        return None
+    pos = texels.pos[sel]
+    if proj.pre is not None:
+        pos = pos @ proj.pre[:3, :3].T + proj.pre[:3, 3]
+    xy, _, _ = proj.camera.project(pos)
+    ih, iw = proj.relief.shape[:2]
+    return render.sample_image_xy(proj.relief[..., None], np.stack([xy[:, 0] * iw / proj.camera.width, xy[:, 1] * ih / proj.camera.height], axis=1))[:, 0]
 
 
 # ---------------------------------------------------------------------------
@@ -866,6 +889,10 @@ def bake_scene(scene: Scene, options: BakeOptions, photo: Optional[PhotoProjecti
                 med = np.median(seen, axis=0)
                 fallback = ch.albedo / np.maximum(srgb_to_linear(np.asarray(mat.base_color)), 1e-3) * med
             ch.albedo = col * wgt[:, None] + fallback * (1 - wgt[:, None])
+            if options.detail_normals:
+                bump = project_relief(tx, sel, photo)
+                if bump is not None:
+                    ch.height = ch.height + bump
         albedo[sel] = ch.albedo
         height[sel] = ch.height
         rough[sel] = ch.roughness

@@ -65,10 +65,20 @@ Restore = new version with an old version's settings (non-destructive).
   by orientation, CIELAB palette, a "drawing-likeness" score (flat colour,
   dark outline, saturation) and a width profile.
 
-## Reconstruction (engine/reconstruction.py, engine/fitting.py)
+## Reconstruction (engine/reconstruction.py, engine/fitting.py, engine/sculpt.py)
 
 ### Strategy selection
-`rank_categories` scores categories from the features; the six best
+Templates are only candidates when the outline has straight edges. The
+outline is simplified to a polygon within 0.6 % of its bounding-box diagonal;
+`outline_straightness` is the share of the perimeter in sides longer than 16 %
+of that diagonal (a curve breaks into short sides, a straight edge survives).
+Below 0.15 (`TEMPLATE_MIN_STRAIGHTNESS`) the object is free-form and no
+template is fitted at all. Measured: egg photo 0.00, plush 0.00, bed photo
+0.29, chair 0.65, table 0.74, emblem 0.90. Before this gate a box-shaped
+template covered any compact blob well enough to be accepted (the decorated
+egg scored 0.63 as a bookshelf).
+
+Otherwise `rank_categories` scores categories from the features; the six best
 templates are fitted coarsely. The two best coarse fits plus the best
 feature-ranked template (or the third coarse fit) are refined with up to 170
 evaluations each, and the lowest refined score wins if it is below the
@@ -76,7 +86,7 @@ acceptance score:
 
 | Silhouette | Acceptance | Reason |
 |---|---|---|
-| lathe-like: mirror symmetry > 0.9 and > 95 % of rows are one run | 0.80 | a surface of revolution reproduces it exactly |
+| lathe-like: mirror symmetry > 0.935 and > 95 % of rows are one run | 0.80 | a surface of revolution reproduces it exactly |
 | organic: solidity > 0.8 and few straight lines | 0.85 | compact blobs are rarely furniture or vehicles |
 | anything else | 1.12 (`TEMPLATE_ACCEPT_SCORE`) | |
 
@@ -135,9 +145,30 @@ largest visible flat face is perspective-rectified into an exemplar patch.
   drop (collinear or repeated, in the ring or its inset) are removed first so
   caps and walls share every edge; a bevel whose inset ring would intersect
   itself or another ring is halved, and dropped after three tries.
-- **Inflate**: signed Euclidean distance of the silhouette, half thickness
-  `sqrt(d/dmax) * depth/2`; the volume is stored as a continuous field
-  (`half_thickness - |z|` inside, distance outside), not as voxels.
+- **Inflate** (`engine/sculpt.py`): the solid is the union of all balls whose
+  equatorial disc fits inside the silhouette (Twarog, Tappen and Adelson
+  2012, "Puffball"). With `D` the distance to the outline, the squared half
+  thickness is `H2(p) = max_c D(c)^2 - |p - c|^2`, the lower envelope of
+  parabolas, computed exactly in two passes (Felzenszwalb and Huttenlocher
+  2012) on a grid of at most 288 px. A disc becomes a sphere, a bar a
+  cylinder, and a part that is narrow in the photo stays equally thin in
+  depth. The field `(H2 - z^2) / (2 sqrt(max H2))` is meshed like the other
+  fields. The outline is first smoothed (Gaussian on the mask, re-thresholded
+  at 0.5) to remove pixel stairs. If at least 30 % of the widest row touches
+  the lowest 2 % of the object, the outline is mirrored below the ground line
+  before inflating, so the model stands on a flat, full-depth base. The map
+  `H2` is stored with the spec; an edit never recomputes it. Reconstructions
+  saved before this model (no `inflate_model` in the spec) still build with
+  the old `sqrt(d/dmax)` profile.
+- **Wrap projection** (inflate): every texel of the solid, front or back,
+  lies behind one object pixel of the orthographic photo, so the colour is
+  looked up directly, without visibility or facing weights; nothing is left
+  bare at the rim. Pixels within 1.2 % of the outline are a blend with the
+  backdrop and are replaced by the nearest colour further inside
+  (`extend_colours`). The band-passed lightness of the photo (Gaussian at
+  size/400 minus Gaussian at size/45, soft-limited) is added to the height
+  channel with an amplitude of 0.6 % of the object height: small bright
+  details rise, small dark ones sink, in the normal map only.
 - **Visual hull**: every orthographic view (front/side/back/left/top)
   contributes its silhouette's signed distance, low-pass filtered to the voxel
   spacing and scaled to studs; the hull is the minimum over views.
@@ -166,6 +197,11 @@ largest visible flat face is perspective-rectified into an exemplar patch.
   over views (k = views - 1): the continuous form of "inside all but one
   silhouette". If no step explains the silhouettes (agreement below 55 %),
   the job falls back to single-image mode and says why.
+- **Photo-set guards**: unlabelled photos that repeat an earlier one (same
+  normalised silhouette, IoU above 0.95, and mean colour difference below 9)
+  are dropped; fewer than four distinct unlabelled photos, or a recovered
+  camera arc below 75 degrees, are not carved (two or three silhouettes only
+  give a prism) and the first photo is reconstructed on its own.
 - **Meshing of fields** (inflate, visual hull, turntable): Gaussian
   smoothing (0.9 voxel for reference views, 0.6 for photo sets, whose thin
   parts are only a few cells wide), always on the full grid, marching cubes

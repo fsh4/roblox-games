@@ -29,6 +29,7 @@ from PIL import Image
 from . import analyzer as an
 from . import geometry as g
 from . import render
+from . import sculpt
 from .fitting import FitTarget, View, count_repeats, fit_template, label_map, make_target, scaled_view
 from .materials import MaterialSpec, infer_kind, make_material, srgb_to_linear
 from .procedural import LOD, TEMPLATES, Template, get_template, m2s
@@ -46,6 +47,15 @@ LATHE_TEMPLATE_SCORE = 0.8
 # Compact silhouettes without straight structure (plush toys, rocks, food) are
 # rarely furniture or vehicles; an inflated silhouette is the safer default.
 ORGANIC_TEMPLATE_SCORE = 0.85
+# Every template is built from straight boards. Below this share of straight
+# outline the object is free-form and no template is tried at all: a box-shaped
+# template always covers a compact blob well enough to score, which is how a
+# decorated egg used to come out as a bookshelf.
+TEMPLATE_MIN_STRAIGHTNESS = 0.15
+# A lathe sweeps the widest half of every row around the axis, so anything
+# off-axis (a handle, a cone leaning on top) turns into a ring. Only clearly
+# mirror-symmetric outlines are revolved.
+LATHE_MIN_SYMMETRY = 0.935
 
 CATEGORY_TEMPLATES = {
     "bed": "bed", "chair": "chair", "stool": "chair", "table": "table", "desk": "table",
@@ -468,23 +478,32 @@ def reconstruct_extrude(src: Source, height_studs: float, thickness_ratio: float
     return Reconstruction(spec, arrays)
 
 
-def reconstruct_inflate(src: Source, height_studs: float, depth_ratio: float = 0.55) -> Reconstruction:
+def reconstruct_inflate(src: Source, height_studs: float, depth_scale: float = 1.0) -> Reconstruction:
+    """Rounded solid from one silhouette; see ``engine.sculpt``."""
     x0, y0, x1, y1 = src.features.bbox
     k = _px_to_studs(src, height_studs)
     cx = (x0 + x1) / 2.0
     width = (x1 - x0 + 1) * k
-    mask = src.seg.filled[y0:y1 + 1, x0:x1 + 1]
+    mask = sculpt.smooth_outline(src.seg.filled)[y0:y1 + 1, x0:x1 + 1]
+    flat_base = sculpt.flat_edge_share(mask, "bottom") >= sculpt.FLAT_SHARE
+    flat_top = sculpt.flat_edge_share(mask, "top") >= 0.6
+    h2, _ = sculpt.thickness_field(mask, flat_base, flat_top)
+    depth = 2.0 * float(np.sqrt(max(h2.max(), 0.0))) * height_studs / max(h2.shape[0], 1) * depth_scale
+    notes = ["Free-form object: the silhouette was inflated into a rounded solid (every part is as deep as it is wide in the photo). "
+             "The back is estimated as a mirror of the front."]
+    if flat_base:
+        notes.append("A straight bottom edge was found, so the model stands on a flat base.")
     spec = {
-        "strategy": "inflate", "category": "inflate",
-        "dimensions": [float(width), float(height_studs), float(min(width, height_studs) * depth_ratio)],
-        "depth_ratio": depth_ratio,
+        "strategy": "inflate", "category": "inflate", "inflate_model": "balls",
+        "dimensions": [float(width), float(height_studs), float(depth)],
+        "depth_scale": float(depth_scale), "flat_base": bool(flat_base), "flat_top": bool(flat_top),
         "bbox": [int(x0), int(y0), int(x1), int(y1)],
         "camera": _front_camera(src, k, (cx, y1)),
-        "confidence": round(0.35 + 0.4 * src.seg.confidence, 3),
-        "notes": ["Organic object: the silhouette was inflated with a rounded thickness profile. Unseen geometry (the back) is estimated as a mirror of the front."],
+        "confidence": round(0.4 + 0.45 * src.seg.confidence, 3),
+        "notes": notes,
         "photo_projection": True,
     }
-    return Reconstruction(spec, {"mask": mask.astype(np.uint8)})
+    return Reconstruction(spec, {"mask": mask.astype(np.uint8), "thickness": h2.astype(np.float32)})
 
 
 # ---------------------------------------------------------------------------
@@ -867,6 +886,44 @@ def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolu
 # Strategy selection
 # ---------------------------------------------------------------------------
 
+MIN_PHOTO_SET = 4
+MIN_ORBIT_DEGREES = 75.0
+
+
+def _yaw_span(angles: Sequence[float]) -> float:
+    """Smallest arc (degrees) that contains every camera direction."""
+    a = np.sort(np.mod(np.asarray(angles, dtype=np.float64), 360.0))
+    if len(a) < 2:
+        return 0.0
+    gaps = np.diff(np.concatenate([a, [a[0] + 360.0]]))
+    return float(360.0 - gaps.max())
+
+
+def _view_signature(src: Source, side: int = 48) -> Tuple[np.ndarray, np.ndarray]:
+    x0, y0, x1, y1 = src.features.bbox
+    mask = cv2.resize(src.seg.filled[y0:y1 + 1, x0:x1 + 1].astype(np.uint8), (side, side), interpolation=cv2.INTER_AREA) > 0
+    rgb = cv2.resize(src.image.rgb[y0:y1 + 1, x0:x1 + 1], (side, side), interpolation=cv2.INTER_AREA).astype(np.float32)
+    return mask, rgb
+
+
+def distinct_views(sources: Sequence[Source]) -> List[Source]:
+    """Drop photos that repeat an earlier one (same silhouette and same colours)."""
+    kept: List[Source] = []
+    signatures = []
+    for s in sources:
+        mask, rgb = _view_signature(s)
+        duplicate = False
+        for other_mask, other_rgb in signatures:
+            both = mask & other_mask
+            iou = both.sum() / max((mask | other_mask).sum(), 1)
+            if iou > 0.95 and both.any() and float(np.abs(rgb - other_rgb)[both].mean()) < 9.0:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(s)
+            signatures.append((mask, rgb))
+    return kept
+
 def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", category: str = "auto", view_labels: Optional[Sequence[str]] = None,
                 target_height: Optional[float] = None, sensitivity: float = 0.5, progress: Progress = None) -> Tuple[Reconstruction, List[Source]]:
     def report(msg, frac):
@@ -878,8 +935,16 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
     notes: List[str] = []
     for s in sources:
         notes.extend(s.seg.notes)
-    if len(sources) > 1 and mode in ("auto", "multi"):
-        labelled = view_labels and all(l in VIEW_DIRECTIONS for l in view_labels[: len(sources)])
+    labelled = bool(view_labels) and all(l in VIEW_DIRECTIONS for l in view_labels[: len(sources)])
+    if len(sources) > 1 and not labelled:
+        distinct = distinct_views(sources)
+        if len(distinct) < len(sources):
+            notes.append(f"{len(sources) - len(distinct)} of the {len(sources)} photos show the same view as another one and were ignored.")
+            sources = distinct
+    if 1 < len(sources) < MIN_PHOTO_SET and not labelled and mode in ("auto", "multi"):
+        notes.append(f"{len(sources)} unlabelled photos are too few to recover the camera path (at least {MIN_PHOTO_SET} around the object are needed, "
+                     "or label them front/side/back/top); the first photo was reconstructed on its own.")
+    elif len(sources) > 1 and mode in ("auto", "multi"):
         h = target_height or 6.0
         try:
             if labelled:
@@ -888,6 +953,9 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
             else:
                 report("estimating camera motion between photos", 0.3)
                 rec = reconstruct_turntable(sources, h)
+                span = _yaw_span([v["azimuth"] for v in rec.spec["views"]])
+                if span < MIN_ORBIT_DEGREES:
+                    raise ReconstructionError(f"the photos only cover {span:.0f} degrees around the object")
             rec.spec["notes"] = notes + rec.spec["notes"]
             rec.spec["mode"] = "B"
             return rec, sources
@@ -909,12 +977,13 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
         report("comparing object templates", 0.08)
         target = make_target(src.image, src.seg)
         f = src.features
-        lathe_like = f.symmetry > 0.9 and f.row_convexity > 0.95
+        lathe_like = f.symmetry > LATHE_MIN_SYMMETRY and f.row_convexity > 0.95
         organic = f.solidity > 0.8 and _straightness(f) < 0.5
+        free_form = f.outline_straightness < TEMPLATE_MIN_STRAIGHTNESS
         # The lamp template is itself a lathe shape: a revolve reproduces lathe-like
         # silhouettes exactly, and other silhouettes cannot be lamps.
-        candidates = [c for c, _ in ranking if c in TEMPLATES and c != "box"
-                      and not (c == "lamp" and (lathe_like or f.row_convexity < 0.9))][:6]
+        candidates = [] if free_form else [c for c, _ in ranking if c in TEMPLATES and c != "box"
+                                           and not (c == "lamp" and (lathe_like or f.row_convexity < 0.9))][:6]
         coarse = []
         for c in candidates:
             res = fit_template(get_template(c), target, coarse_only=True)
@@ -934,17 +1003,19 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
             scored.append((res.score, c))
             alternatives.append({"template": c, "coarse_score": round(cs, 4), "refined_score": round(res.score, 4)})
         scored.sort()
-        best_score, best = scored[0]
         accept = LATHE_TEMPLATE_SCORE if lathe_like else ORGANIC_TEMPLATE_SCORE if organic else TEMPLATE_ACCEPT_SCORE
-        if best_score < accept:
-            chosen = best
+        if scored and scored[0][0] < accept:
+            chosen = scored[0][1]
         elif f.drawing_likeness > 0.55:
             chosen = "extrude"
         elif lathe_like:
             chosen = "revolve"
         else:
             chosen = "inflate"
-        notes.append(f"Detected category: {chosen} (template scores: " + ", ".join(f"{c} {s:.2f}" for s, c in scored) + ").")
+        if scored:
+            notes.append(f"Detected category: {chosen} (template scores: " + ", ".join(f"{c} {s:.2f}" for s, c in scored) + ").")
+        else:
+            notes.append(f"Detected category: {chosen} (curved outline, {f.outline_straightness:.0%} straight edges: furniture and building templates were not considered).")
     report(f"reconstructing as {chosen}", 0.15)
     if chosen in TEMPLATES:
         def sub(msg, f):
@@ -1096,9 +1167,14 @@ def build_generic_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> 
         parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, native)]
     elif strategy == "inflate":
         mask = np.asarray(arrays["mask"]) > 0
-        res = int(np.clip(40 + lod.q * 110, 40, 150))
-        fld, origin, step = _inflate_volume(mask, dims, dims[2], res)
-        mesh = _field_mesh(fld, origin, step)
+        if spec.get("inflate_model") == "balls":
+            res = int(np.clip(56 + lod.q * 120, 56, 176))
+            fld, origin, step = sculpt.volume_from_thickness(np.asarray(arrays["thickness"], dtype=np.float64), dims, res, float(spec.get("depth_scale", 1.0)))
+            mesh = _field_mesh(fld, origin, step, smooth_iters=6, smoothing=0.7)
+        else:
+            res = int(np.clip(40 + lod.q * 110, 40, 150))
+            fld, origin, step = _inflate_volume(mask, dims, dims[2], res)
+            mesh = _field_mesh(fld, origin, step)
         parts = [Part("Body", mesh, "surface", np.eye(4), 0, "u", 1, True, _voxel_natives(fld > 0, origin, step, "surface"))]
     elif strategy in ("visual_hull", "turntable"):
         if "field" in arrays:
@@ -1192,7 +1268,7 @@ def _assign_chart_uvs(mesh: g.Mesh) -> None:
     mesh.uvs = uv - uv.min(0)
 
 
-def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene) -> Optional[PhotoProjection]:
+def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene, arrays: Optional[Dict[str, np.ndarray]] = None) -> Optional[PhotoProjection]:
     """Camera(s) that map model space onto the source photo(s)."""
     if not spec.get("photo_projection"):
         return None
@@ -1205,6 +1281,15 @@ def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene) ->
         ox, oy = cam_spec["origin_px"]
         view = render.look_at((0, 0, -50), (0, 0, 0))
         cam = render.Camera(view, w, h, ortho_scale=ppm, cx=ox, cy=oy)
+        if spec.get("inflate_model") == "balls":
+            x0, y0, x1, y1 = spec["bbox"]
+            inside = np.zeros(src.image.rgb.shape[:2], bool)
+            stored = np.asarray(arrays["mask"]) > 0 if arrays and "mask" in arrays else src.seg.filled[y0:y1 + 1, x0:x1 + 1]
+            inside[y0:y1 + 1, x0:x1 + 1] = stored
+            extended = sculpt.extend_colours(src.image.rgb, inside)
+            img = srgb_to_linear(extended.astype(np.float64) / 255.0)
+            relief = sculpt.photo_relief(extended, inside, spec["dimensions"][1])
+            return PhotoProjection(img, cam, None, mirror_axis=2, mirror_center=0.0, wrap=True, relief=relief)
         img = srgb_to_linear(src.image.rgb.astype(np.float64) / 255.0)
         return PhotoProjection(img, cam, src.seg.mask.astype(np.uint8), mirror_axis=2, mirror_center=0.0)
     if strategy == "template":

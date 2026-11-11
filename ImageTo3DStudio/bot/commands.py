@@ -20,7 +20,7 @@ PAGE = 10
 CATEGORY_LABELS = {
     "auto": "Auto detect", "bed": "Bed", "chair": "Chair / stool", "table": "Table / desk", "sofa": "Sofa", "cabinet": "Cabinet / dresser",
     "shelf": "Shelf / bookcase", "lamp": "Lamp", "house": "House / building", "car": "Car / vehicle", "box": "Box / crate (photo projected)",
-    "revolve": "Round object (vase, bottle, barrel)", "extrude": "Flat object / drawing", "inflate": "Organic object (toy, fruit, rock)",
+    "revolve": "Round object (vase, bottle, barrel)", "extrude": "Flat object / drawing", "inflate": "Free-form object (toy, food, character, prop)",
 }
 
 

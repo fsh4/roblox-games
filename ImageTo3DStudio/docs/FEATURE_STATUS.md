@@ -35,7 +35,9 @@ the evidence column says which.
 | Photo exemplar textures (wood, stone, leather) | Done + tested | `test_exemplar_synthesis_keeps_colour_statistics`; used on the bed |
 | Surface of revolution (vases, bottles, lamps) | Done + tested | Vase, chosen automatically |
 | Extrusion of flat artwork with holes | Done + tested | Emblem, chosen automatically, centre hole kept |
-| Silhouette inflation (organic objects) | Done + tested | Plush, chosen automatically |
+| Free-form objects: medial-ball inflation, flat base, wrap projection, photo relief | Done + tested | Egg photo and plush, chosen automatically; `tests/test_sculpt.py` (disc gives a sphere within 12 % volume, thin parts stay thin) |
+| Templates only for outlines with straight edges | Done + tested | `test_decorated_egg_is_not_furniture`: no template is tried on the egg photo |
+| Repeated or too few unlabelled photos fall back to one photo | Done + tested | `test_repeated_photo_does_not_start_a_photo_set` |
 | Visual hull from labelled views (front/side/back/left/top) | Done + tested | Mug from 4 views |
 | Photo set walked around the object (unlabelled) | Done + tested | 8 chair photos: steps recovered as 45.0 degrees (true 45), elevation 15 (true 14); legs and the three back slats kept |
 | Photo set: SIFT and essential-matrix path | Done, not fully tested | Implemented; the test set has too little texture, so the silhouette-coherence fallback is what was measured |
