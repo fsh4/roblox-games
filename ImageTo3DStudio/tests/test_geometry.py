@@ -102,3 +102,21 @@ def test_split_for_roblox_respects_meshpart_limit():
     assert sum(p.triangle_count for _, p in parts) == m.triangle_count
     merged = np.sort(np.concatenate([p.vertices[p.faces].reshape(-1, 9) for _, p in parts]), axis=0)
     assert np.allclose(merged, np.sort(m.vertices[m.faces].reshape(-1, 9), axis=0)), "no triangle may be lost or changed"
+
+
+def test_pinched_sheets_are_separated():
+    from engine.optimization import _topology_defects, split_pinches
+
+    def tet(a, b, c, d):
+        return [[a, c, b], [a, b, d], [b, c, d], [a, d, c]]
+
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0.5, 1, 0], [0.5, 0.4, 1], [0.5, -1, 0], [0.5, -0.4, -1]], float)
+    faces = np.array(tet(0, 1, 2, 3) + tet(1, 0, 4, 5))
+    m = g.Mesh(verts, faces)
+    assert _topology_defects(m.faces) > 0, "two solids sharing an edge"
+    v, f = split_pinches(m.vertices, m.faces)
+    out = g.Mesh(v, f)
+    out.normals = g.vertex_normals(out)
+    assert _topology_defects(out.faces) == 0
+    assert edge_report(out) == (0, 0, 0)
+    assert len(v) == 8

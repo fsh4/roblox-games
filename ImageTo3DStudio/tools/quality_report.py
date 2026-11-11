@@ -129,15 +129,21 @@ def main() -> int:
     ap.add_argument("--work", default=str(ROOT / "data" / "quality_runs"))
     ap.add_argument("--blender", default=os.environ.get("BPY_PYTHON", ""))
     ap.add_argument("--rbxcheck", default=os.environ.get("RBXCHECK", ""))
+    ap.add_argument("--only", default="", help="comma-separated case names; other rows of the report are kept")
     args = ap.parse_args()
+    only = {n.strip() for n in args.only.split(",") if n.strip()}
     out = Path(args.out)
     work = Path(args.work)
-    if work.exists():
+    if work.exists() and not only:
         shutil.rmtree(work)
     out.mkdir(parents=True, exist_ok=True)
     rows = []
     for case in CASES:
+        if only and case["name"] not in only:
+            continue
         proj = work / case["name"]
+        if proj.exists():
+            shutil.rmtree(proj)
         (proj / "source").mkdir(parents=True)
         for i, n in enumerate(case["images"]):
             shutil.copy(ROOT / "assets" / "test_images" / n, proj / "source" / f"image_{i + 1}{Path(n).suffix}")
@@ -180,7 +186,11 @@ def main() -> int:
         rows.append(row)
         print(case["name"], row["status"], row.get("strategy"), row.get("triangles"), f"{row.get('seconds')}s", f"IoU {row.get('silhouette_iou')}", flush=True)
     (ROOT / "docs").mkdir(exist_ok=True)
-    (ROOT / "docs" / "quality_report.json").write_text(json.dumps(rows, indent=2, default=str))
+    report = ROOT / "docs" / "quality_report.json"
+    if only and report.exists():
+        fresh = {r["case"]: r for r in rows}
+        rows = [fresh.get(r["case"], r) for r in json.loads(report.read_text())]
+    report.write_text(json.dumps(rows, indent=2, default=str))
     return 0 if all(r["status"] == "ok" for r in rows) else 1
 
 

@@ -7,14 +7,14 @@
     "status": "ok",
     "strategy": "template",
     "category": "bed",
-    "confidence": 0.456,
+    "confidence": 0.479,
     "triangles": 4512,
     "vertices": 3392,
     "meshes": 1,
     "native_parts": 24,
     "size_studs": [
       4.437,
-      3.571,
+      4.149,
       7.541
     ],
     "maps": [
@@ -23,25 +23,25 @@
       "normal",
       "roughness"
     ],
-    "seconds": 223.8,
-    "peak_rss_mb": 923.0,
+    "seconds": 225.3,
+    "peak_rss_mb": 930.0,
     "reduction_percent": 77.29,
     "impact": {
-      "mean_deviation_percent": 0.273,
-      "p95_deviation_percent": 0.651,
+      "mean_deviation_percent": 0.275,
+      "p95_deviation_percent": 0.654,
       "rating": "low"
     },
     "validation_ok": true,
     "watertight": true,
     "warnings": [],
     "fit": {
-      "background_overlap": 0.1433,
-      "object_missed": 0.1057,
-      "probable_missed": 0.2135,
-      "edge_chamfer": 0.4394,
-      "edge_coverage": 0.3572
+      "background_overlap": 0.1113,
+      "object_missed": 0.1281,
+      "probable_missed": 0.214,
+      "edge_chamfer": 0.4222,
+      "edge_coverage": 0.2954
     },
-    "silhouette_iou": 0.664,
+    "silhouette_iou": 0.671,
     "blender_fbx": {
       "objects": 1,
       "triangles": 4512,
@@ -66,7 +66,7 @@
     "status": "ok",
     "strategy": "template",
     "category": "chair",
-    "confidence": 0.699,
+    "confidence": 0.704,
     "triangles": 3900,
     "vertices": 2808,
     "meshes": 1,
@@ -82,8 +82,8 @@
       "normal",
       "roughness"
     ],
-    "seconds": 123.4,
-    "peak_rss_mb": 923.0,
+    "seconds": 124.9,
+    "peak_rss_mb": 930.0,
     "reduction_percent": 48.98,
     "impact": {
       "mean_deviation_percent": 0.03,
@@ -95,7 +95,7 @@
     "warnings": [],
     "fit": {
       "background_overlap": 0.0605,
-      "object_missed": 0.053,
+      "object_missed": 0.0528,
       "probable_missed": 0.3623,
       "edge_chamfer": 0.2981,
       "edge_coverage": 0.2382
@@ -141,8 +141,8 @@
       "normal",
       "roughness"
     ],
-    "seconds": 98.1,
-    "peak_rss_mb": 923.0,
+    "seconds": 96.1,
+    "peak_rss_mb": 930.0,
     "reduction_percent": 81.63,
     "impact": {
       "mean_deviation_percent": 0.028,
@@ -184,34 +184,34 @@
     "status": "ok",
     "strategy": "revolve",
     "category": "revolve",
-    "confidence": 0.852,
+    "confidence": 0.854,
     "triangles": 2852,
-    "vertices": 1842,
+    "vertices": 1822,
     "meshes": 1,
     "native_parts": 6,
     "size_studs": [
-      1.308,
+      1.306,
       2.139,
-      1.31
+      1.307
     ],
     "maps": [
       "ambient_occlusion",
       "basecolor",
       "roughness"
     ],
-    "seconds": 91.5,
-    "peak_rss_mb": 923.0,
+    "seconds": 89.8,
+    "peak_rss_mb": 930.0,
     "reduction_percent": 23.13,
     "impact": {
       "mean_deviation_percent": 0.274,
-      "p95_deviation_percent": 0.523,
+      "p95_deviation_percent": 0.525,
       "rating": "negligible"
     },
     "validation_ok": true,
     "watertight": true,
     "warnings": [],
     "fit": null,
-    "silhouette_iou": 0.973,
+    "silhouette_iou": 0.974,
     "blender_fbx": {
       "objects": 1,
       "triangles": 2852,
@@ -251,8 +251,8 @@
       "normal",
       "roughness"
     ],
-    "seconds": 124.2,
-    "peak_rss_mb": 923.0,
+    "seconds": 123.7,
+    "peak_rss_mb": 930.0,
     "reduction_percent": 92.39,
     "impact": {
       "mean_deviation_percent": 0.851,
@@ -289,8 +289,8 @@
     "strategy": "extrude",
     "category": "extrude",
     "confidence": 0.85,
-    "triangles": 1984,
-    "vertices": 3472,
+    "triangles": 1960,
+    "vertices": 3430,
     "meshes": 1,
     "native_parts": 1,
     "size_studs": [
@@ -303,12 +303,12 @@
       "basecolor",
       "roughness"
     ],
-    "seconds": 99.8,
-    "peak_rss_mb": 923.0,
-    "reduction_percent": 40.95,
+    "seconds": 101.9,
+    "peak_rss_mb": 930.0,
+    "reduction_percent": 35.01,
     "impact": {
-      "mean_deviation_percent": 0.171,
-      "p95_deviation_percent": 0.369,
+      "mean_deviation_percent": 0.166,
+      "p95_deviation_percent": 0.371,
       "rating": "negligible"
     },
     "validation_ok": true,
@@ -318,7 +318,7 @@
     "silhouette_iou": 0.988,
     "blender_fbx": {
       "objects": 1,
-      "triangles": 1984,
+      "triangles": 1960,
       "packed_images": 2,
       "texture_sockets": [
         "Base Color",
@@ -341,13 +341,13 @@
     "category": "visual_hull",
     "confidence": 0.9,
     "triangles": 4000,
-    "vertices": 2726,
+    "vertices": 2695,
     "meshes": 1,
-    "native_parts": 19,
+    "native_parts": 23,
     "size_studs": [
-      8.507,
-      5.895,
-      5.882
+      8.466,
+      5.934,
+      5.921
     ],
     "maps": [
       "ambient_occlusion",
@@ -355,19 +355,19 @@
       "normal",
       "roughness"
     ],
-    "seconds": 51.5,
-    "peak_rss_mb": 1031.0,
-    "reduction_percent": 94.77,
+    "seconds": 51.0,
+    "peak_rss_mb": 1035.0,
+    "reduction_percent": 94.82,
     "impact": {
-      "mean_deviation_percent": 0.384,
-      "p95_deviation_percent": 0.644,
+      "mean_deviation_percent": 0.383,
+      "p95_deviation_percent": 0.642,
       "rating": "low"
     },
     "validation_ok": true,
     "watertight": true,
     "warnings": [],
     "fit": null,
-    "silhouette_iou": 0.977,
+    "silhouette_iou": 0.978,
     "blender_fbx": {
       "objects": 1,
       "triangles": 4000,
@@ -380,7 +380,7 @@
     },
     "rbxm_check": {
       "ok": true,
-      "parts": 19,
+      "parts": 23,
       "binary_equals_xml": true
     }
   },
@@ -394,13 +394,13 @@
     "category": "turntable",
     "confidence": 0.45,
     "triangles": 4000,
-    "vertices": 4315,
+    "vertices": 4995,
     "meshes": 1,
-    "native_parts": 14,
+    "native_parts": 12,
     "size_studs": [
-      3.013,
-      5.501,
-      2.903
+      3.028,
+      5.479,
+      2.868
     ],
     "maps": [
       "ambient_occlusion",
@@ -408,19 +408,22 @@
       "normal",
       "roughness"
     ],
-    "seconds": 42.8,
-    "peak_rss_mb": 1031.0,
-    "reduction_percent": 87.44,
+    "seconds": 45.6,
+    "peak_rss_mb": 1035.0,
+    "reduction_percent": 89.47,
     "impact": {
-      "mean_deviation_percent": 2.441,
-      "p95_deviation_percent": 5.525,
+      "mean_deviation_percent": 2.124,
+      "p95_deviation_percent": 5.802,
       "rating": "high"
     },
     "validation_ok": true,
-    "watertight": true,
-    "warnings": [],
+    "watertight": false,
+    "warnings": [
+      "Body: 3 non-manifold edges",
+      "Body: 6 edges with inconsistent winding"
+    ],
     "fit": null,
-    "silhouette_iou": 0.791,
+    "silhouette_iou": 0.688,
     "blender_fbx": {
       "objects": 1,
       "triangles": 4000,
@@ -433,7 +436,7 @@
     },
     "rbxm_check": {
       "ok": true,
-      "parts": 14,
+      "parts": 12,
       "binary_equals_xml": true
     }
   }

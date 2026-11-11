@@ -110,13 +110,77 @@ def decimate_mesh(mesh: g.Mesh, target: int, smooth_angle: float = 40.0) -> g.Me
     pts = mesh.vertices[first]
     tris = inverse.reshape(-1)[mesh.faces]
     good = (tris[:, 0] != tris[:, 1]) & (tris[:, 1] != tris[:, 2]) & (tris[:, 0] != tris[:, 2])
-    tris = tris[good]
-    out_pts, out_tris = fast_simplification.simplify(pts, tris.astype(np.int64), target_count=target, agg=7.0)
-    out = g.Mesh(out_pts, out_tris, None, np.zeros((len(out_pts), 2)), None, mesh.name)
-    out = _drop_bad_faces(out)
+    tris = tris[good].astype(np.int64)
+    best = None
+    # Aggressive collapses can pinch thin parts (chair slats) into edges shared
+    # by more than two triangles. Retry gentler or slightly lower targets and
+    # keep the first manifold result within the budget.
+    for agg, scale in ((7.0, 1.0), (5.0, 1.0), (7.0, 0.97), (5.0, 0.97), (7.0, 0.93), (5.0, 0.93), (3.0, 0.9)):
+        out_pts, out_tris = fast_simplification.simplify(pts, tris, target_count=max(4, int(target * scale)), agg=agg)
+        out = _drop_bad_faces(g.Mesh(out_pts, out_tris, None, np.zeros((len(out_pts), 2)), None, mesh.name))
+        if out.triangle_count > target:
+            continue
+        defects = _topology_defects(out.faces)
+        if best is None or defects < best[0]:
+            best = (defects, out)
+        if defects == 0:
+            break
+    out = best[1] if best is not None else out
+    if _topology_defects(out.faces):
+        out.vertices, out.faces = split_pinches(out.vertices, out.faces)
+        out.uvs = np.zeros((len(out.vertices), 2))
     if out.signed_volume() < 0:
         out.faces = out.faces[:, ::-1].copy()
     return g.recompute_normals(out, smooth_angle)
+
+
+def split_pinches(vertices: np.ndarray, faces: np.ndarray, gap: float = 0.002) -> Tuple[np.ndarray, np.ndarray]:
+    """Separate surface sheets that touch along an edge or at a vertex.
+
+    Triangle corners are joined only across edges shared by exactly two
+    triangles; every resulting corner group becomes its own vertex. Where a
+    vertex splits, each copy moves ``gap`` studs along the normal of its own
+    sheet, so the sheets no longer touch and every edge borders two triangles.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    n_faces = len(faces)
+    corner_vertex = faces.reshape(-1)
+    c0 = np.arange(3 * n_faces)
+    c1 = (c0 // 3) * 3 + (c0 % 3 + 1) % 3
+    va, vb = corner_vertex[c0], corner_vertex[c1]
+    key = np.minimum(va, vb).astype(np.int64) * (len(vertices) + 1) + np.maximum(va, vb)
+    order = np.argsort(key, kind="stable")
+    _, start, counts = np.unique(key[order], return_index=True, return_counts=True)
+    pair = counts == 2
+    i1, i2 = order[start[pair]], order[start[pair] + 1]
+    same = va[i1] == va[i2]
+    rows = np.concatenate([c0[i1], c1[i1]])
+    cols = np.concatenate([np.where(same, c0[i2], c1[i2]), np.where(same, c1[i2], c0[i2])])
+    graph = coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(3 * n_faces, 3 * n_faces))
+    n_groups, group = connected_components(graph, directed=False)
+    positions = np.zeros((n_groups, 3))
+    positions[group] = vertices[corner_vertex]
+    source = np.zeros(n_groups, dtype=np.int64)
+    source[group] = corner_vertex
+    copies = np.bincount(source, minlength=len(vertices))
+    tri = vertices[faces]
+    face_n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    group_n = np.zeros((n_groups, 3))
+    np.add.at(group_n, group, np.repeat(face_n, 3, axis=0))
+    group_n /= np.maximum(np.linalg.norm(group_n, axis=1, keepdims=True), 1e-12)
+    split = copies[source] > 1
+    positions[split] += group_n[split] * gap
+    return positions, group.reshape(-1, 3)
+
+
+def _topology_defects(faces: np.ndarray) -> int:
+    """Edges shared by more than two triangles plus edges used twice in the same direction."""
+    directed = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]])
+    _, ucount = np.unique(np.sort(directed, axis=1), axis=0, return_counts=True)
+    _, dcount = np.unique(directed, axis=0, return_counts=True)
+    return int((ucount > 2).sum() + (dcount > 1).sum())
 
 
 def transfer_normals(source: g.Mesh, target: g.Mesh, k: int = 6) -> np.ndarray:
