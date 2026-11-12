@@ -22,7 +22,7 @@ PAGE = 10
 STYLE_LABELS = {"realistic": "Realistic (photo texture)", "cartoon": "Cartoon (flat bright colours)", "blocky": "Blocky (stacked blocks, symmetric)"}
 
 CATEGORY_LABELS = {
-    "auto": "Auto detect", "bed": "Bed", "chair": "Chair / stool", "table": "Table / desk", "sofa": "Sofa", "cabinet": "Cabinet / dresser",
+    "auto": "Auto (model the shape as it is)", "bed": "Bed", "chair": "Chair / stool", "table": "Table / desk", "sofa": "Sofa", "cabinet": "Cabinet / dresser",
     "shelf": "Shelf / bookcase", "lamp": "Lamp", "house": "House / building", "car": "Car / vehicle", "box": "Box / crate (photo projected)",
     "revolve": "Round object (vase, bottle, barrel)", "extrude": "Flat object / drawing", "inflate": "Free-form object (toy, food, character, prop)",
 }
@@ -60,7 +60,7 @@ class StudioCommands(app_commands.Group):
     @app_commands.command(name="create", description="Turn photos into a 3D model")
     @app_commands.describe(
         image="Photo of the object (leave empty to open the upload form)", image2="Extra view", image3="Extra view", image4="Extra view",
-        category="What the object is (auto detects furniture, vehicles, buildings and generic shapes)",
+        category="Leave on auto: the shape is modelled as it is. Pick a furniture template only if you want one",
         mode="auto, single (one-photo generic reconstruction) or multi (several photos)",
         views="For several photos: their directions, e.g. front,side,back,top",
         triangles="Triangle budget (60 - 60,000)", texture="Texture atlas size", quality="Geometry and baking quality", name="Model name",

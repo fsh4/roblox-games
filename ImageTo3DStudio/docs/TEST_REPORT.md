@@ -245,3 +245,15 @@ colours, accessories and symmetry.
 | Validation | every sample watertight, no warnings |
 
 Test suite: 100 passed, 1 skipped (the Blender cross-check; Blender is not installed here), 10 min 54 s.
+
+## Update 2026-11-12: no more category guessing
+
+Owner feedback: a parcel photo (box with a dessert on top) became a sofa;
+remove the guessing and model whatever is uploaded as it is.
+
+| Check | Before | After |
+|---|---|---|
+| Parcel photo | sofa template | box 1.8 x 1.3 x 1.8 studs fitted with the camera, dessert as its own part standing on the lid, logo and label readable, hidden faces filled from the opposite face |
+| Chair and table renders, automatic | chair / table templates | never a template (only with `category=chair` / `table`) |
+| Bed photo with `category=bed` | bed template | unchanged |
+| Box photo in blocky and cartoon styles | not possible | valid, watertight |

@@ -77,47 +77,58 @@ Restore = new version with an old version's settings (non-destructive).
   tiger and the lion.
 - **MPO** (the JPEG variant many phones and cameras write) is accepted.
 
-## Reconstruction (engine/reconstruction.py, engine/fitting.py, engine/sculpt.py, engine/surround.py)
+## Reconstruction (engine/reconstruction.py, engine/fitting.py, engine/sculpt.py, engine/surround.py, engine/composite.py)
 
 ### Strategy selection
-Templates are only candidates when the outline has straight edges. The
-outline is simplified to a polygon within 0.6 % of its bounding-box diagonal;
-`outline_straightness` is the share of the perimeter in sides longer than 16 %
-of that diagonal (a curve breaks into short sides, a straight edge survives).
-Below 0.15 (`TEMPLATE_MIN_STRAIGHTNESS`) the object is free-form and no
-template is fitted at all. Measured: egg photo 0.00, plush 0.00, bed photo
-0.29, chair 0.65, table 0.74, emblem 0.90. Before this gate a box-shaped
-template covered any compact blob well enough to be accepted (the decorated
-egg scored 0.63 as a bookshelf).
+No object category is guessed. Automatic mode looks only at the shape, so a
+parcel cannot turn into a sofa and an egg cannot turn into a bookshelf (both
+happened with the earlier category ranking, which is removed):
 
-Templates are also skipped when the cut-out runs along more than 25 % of the
-picture's edge (it has swallowed the surroundings), and a silhouette with a
-see-through opening only tries the templates that have gaps (chair, table,
-shelf, bed). A refined fit is rejected when more than 16 % of the template
-covers background (`TEMPLATE_MAX_SPILL`); the bed photo needs 11 %, the
-chair 6 %, the table 1 %, and a photo of two cars that fitted a sofa 22 %.
+1. A drawing score above 0.55 (share of perfectly flat pixels, share of the
+   four most common colours, dark outline) means flat artwork: extrusion.
+2. The silhouette is split into body and parts sticking out
+   (`sculpt.split_body`). A body whose outline is convex (solidity at least
+   0.93) with four to seven straight sides (polygon at 2 % tolerance,
+   straightness at least 0.4) is tried as a box with attached parts
+   (`engine/composite.py`, below). If no box explains it (more than 6 % of
+   the box on background or more than 20 % of the body missed), it is
+   modelled as a free-form solid instead.
+3. A clearly mirror-symmetric outline with one span per row (symmetry above
+   0.935, 95 % of rows) is revolved.
+4. Anything else is inflated (rounded solid, symmetric body, accessories).
 
-Otherwise `rank_categories` scores categories from the features; the six best
-templates are fitted coarsely. The two best coarse fits plus the best
-feature-ranked template (or the third coarse fit) are refined with up to 170
-evaluations each, and the lowest refined score wins if it is below the
-acceptance score:
+When the cut-out runs along more than 25 % of the picture's edge (it has
+swallowed the surroundings) no box is fitted and the user is told why.
+Furniture, building and vehicle templates are used only when the user picks
+that category; the fit score is then reported with the model.
 
-| Silhouette | Acceptance | Reason |
-|---|---|---|
-| lathe-like: mirror symmetry > 0.935 and > 95 % of rows are one run | 0.80 | a surface of revolution reproduces it exactly |
-| organic: solidity > 0.8 and few straight lines | 0.85 | compact blobs are rarely furniture or vehicles |
-| anything else | 1.12 (`TEMPLATE_ACCEPT_SCORE`) | |
-
-The lamp template is not tried for lathe-like silhouettes (revolve is exact)
-nor for silhouettes with many split rows (a lamp is a lathe shape). Without an
-accepted template: a drawing score above 0.55 selects extrusion, a lathe-like
-silhouette revolution, anything else inflation. The drawing score combines
-the share of perfectly flat pixels (|Laplacian| < 3), the share of the four
-most common colours (4 bits per channel) and a dark outline along the
-silhouette. Every tested template and its score is written to the
-reconstruction notes. The user can force a category or mode, and can
-re-analyse later.
+### Box with attached parts (engine/composite.py)
+- **Box and camera**: the box template (width, height, depth) and a
+  perspective camera (azimuth, elevation, field of view, scale, shift) are
+  fitted to the body by the analysis-by-synthesis search below. Body pixels
+  are certain object; pixels of the silhouette inside the body's convex hull
+  are neutral; everything else is background.
+- **Second pass**: whatever sticks out of the fitted box by more than 3 px
+  (a cake on the lid) is made background and the box is fitted again, so a
+  part on top cannot stretch the box upwards. Parcel photo: 1.8 x 1.3 x 1.8
+  studs, camera 21 degrees above and 46 degrees to the side.
+- **Parts on the box**: pieces sticking out of the box outline, after an
+  opening that removes slivers along the box edges, seed a GrabCut in a
+  window below and around them (the seed is certain object, box pixels more
+  than 1.1 piece widths to the side are certain box). This recovers the
+  whole part even where it covers the box face and its colours are close to
+  the box's.
+- **Placement**: the ray from the fitted camera through the part's foot
+  pixel is intersected with the box (slab test). The part is inflated from
+  its own outline and stood upright at that point, facing the camera, with
+  the camera's stud-per-pixel scale at that distance (separately for
+  horizontal and vertical, which absorbs the foreshortening), sunk 3 % into
+  the face so it does not float.
+- **Texture**: the box takes the photo through the fitted camera. Spots the
+  photo does not show (hidden faces, the lid under the part) are filled,
+  and only there, from the same photo seen through the box turned half way
+  round, which keeps printing readable. Each part keeps a front-on photo
+  projection with a synthesised back, like any inflated object.
 
 ### Template fitting (analysis-by-synthesis)
 A hypothesis is (template parameters, azimuth, elevation, field of view, 2D

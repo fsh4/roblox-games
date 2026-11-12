@@ -255,16 +255,11 @@ def _mirror_score(mask: np.ndarray) -> Tuple[float, int]:
     return best
 
 
-def shape_parts(mask: np.ndarray) -> ShapeParts:
-    """Split off thin protrusions as accessories and make a nearly symmetric body exactly symmetric.
+def split_body(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Body (what survives an opening with a disc of 18 % of the smaller side) and accessories.
 
-    The body is what survives a morphological opening with a disc of 18 % of
-    the object's smaller side (thin parts sticking out do not). If the body
-    is less than 45 % of the silhouette the object is made of thin parts (a
-    sword, a stick figure) and stays one piece. A body whose mirror image
-    overlaps it by at least ``SYMMETRY_MIN`` is replaced by the average of
-    its signed distance and the mirrored one, which keeps its size and makes
-    it exactly symmetric; accessories keep their place from the photo.
+    Returns (body mask, accessory labels 1..n, n). If the body is under 45 %
+    of the silhouette the object is made of thin parts and stays whole.
     """
     mask = mask.astype(bool)
     h, w = mask.shape
@@ -286,6 +281,23 @@ def shape_parts(mask: np.ndarray) -> ShapeParts:
         if stats[i, cv2.CC_STAT_AREA] >= ACCESSORY_MIN_SHARE * total:
             k += 1
             accessories[acc == i] = k
+    return body, accessories, k
+
+
+def shape_parts(mask: np.ndarray) -> ShapeParts:
+    """Split off thin protrusions as accessories and make a nearly symmetric body exactly symmetric.
+
+    The body is what survives a morphological opening with a disc of 18 % of
+    the object's smaller side (thin parts sticking out do not). If the body
+    is less than 45 % of the silhouette the object is made of thin parts (a
+    sword, a stick figure) and stays one piece. A body whose mirror image
+    overlaps it by at least ``SYMMETRY_MIN`` is replaced by the average of
+    its signed distance and the mirrored one, which keeps its size and makes
+    it exactly symmetric; accessories keep their place from the photo.
+    """
+    mask = mask.astype(bool)
+    h, w = mask.shape
+    body, accessories, k = split_body(mask)
     score, axis = _mirror_score(body)
     if score < SYMMETRY_MIN:
         regions = np.where(mask, 0, -1).astype(np.int32)

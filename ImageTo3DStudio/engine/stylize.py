@@ -656,9 +656,14 @@ def _lin(img_u8: np.ndarray) -> np.ndarray:
 def cartoon_projection(photo) -> None:
     """Replace every photo of a projection (and a synthesised back) by its flat-colour version."""
     shared = None
-    for view in [photo] + list(photo.extra):
+    done = {}
+    for view in photo.views():
         inside = view.mask > 0 if view.mask is not None else np.ones(view.image_lin.shape[:2], bool)
-        flat, shared = cartoonize(_u8(view.image_lin), inside, pal=shared)
+        key = id(view.image_lin)
+        if key not in done:
+            done[key] = cartoonize(_u8(view.image_lin), inside, pal=shared)
+            shared = done[key][1]
+        flat = done[key][0]
         sur = getattr(view, "surround", None)
         view.image_lin = _lin(flat)
         view.relief = None
@@ -675,9 +680,13 @@ def flatten_projection(photo, strength: float = 0.8) -> None:
     Used before block colours are sampled, so one surface in light and in
     shadow gives one block colour, not two.
     """
-    for view in [photo] + list(photo.extra):
+    done = {}
+    for view in photo.views():
         inside = view.mask > 0 if view.mask is not None else np.ones(view.image_lin.shape[:2], bool)
-        view.image_lin = _lin(flatten_lighting(_u8(view.image_lin), inside, strength))
+        key = id(view.image_lin)
+        if key not in done:
+            done[key] = _lin(flatten_lighting(_u8(view.image_lin), inside, strength))
+        view.image_lin = done[key]
         sur = getattr(view, "surround", None)
         if sur is not None:
             sur.front = view.image_lin

@@ -39,6 +39,7 @@ STRATEGY_LABELS = {
     "inflate": "Mode A - single image, rounded solid from the silhouette",
     "visual_hull": "Mode B - multiple labelled views, visual hull",
     "turntable": "Mode B - photo set, recovered camera yaw + visual hull",
+    "composite": "Mode A - single image, fitted box with attached parts",
 }
 QUALITY = {
     "draft": {"q_cap": 0.35, "ao_dirs": 24, "fit_budget": 220, "detail": False},
@@ -225,8 +226,7 @@ def build_version(project_dir: str, version_dir: str, spec: dict, arrays: Dict[s
             final = hi_before - lo_before
             factors = np.where(base > 1e-9, final / np.maximum(base, 1e-9), 1.0)
             pre = g.scaling(1.0 / factors) @ g.translation(-offset)
-            for view in [photo] + list(photo.extra):
-                view.pre = pre
+            photo.set_pre(pre)
     style = settings.texture_style
     ao_dirs = QUALITY[settings.quality]["ao_dirs"]
     detail = QUALITY[settings.quality]["detail"]

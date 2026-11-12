@@ -30,6 +30,7 @@ from . import analyzer as an
 from . import geometry as g
 from . import render
 from . import sculpt
+from . import composite
 from . import surround
 from .fitting import FitTarget, View, count_repeats, fit_template, label_map, make_target, scaled_view
 from .materials import MaterialSpec, infer_kind, linear_to_srgb, make_material, srgb_to_linear
@@ -39,27 +40,13 @@ from .textures import PhotoProjection
 
 Progress = Optional[Callable[[str, float], None]]
 
-# Refined template fits scoring below this are accepted; worse fits fall back to
-# the generic strategies (revolve / extrude / inflate).
+# Quality bar of a template the user asked for (category option); the fit
+# score is reported with the model. Templates are never chosen automatically.
 TEMPLATE_ACCEPT_SCORE = 1.12
-# A mirror-symmetric silhouette with one span per row is reproduced exactly by
-# a surface of revolution, so a template has to fit clearly better to win.
-LATHE_TEMPLATE_SCORE = 0.8
-# Compact silhouettes without straight structure (plush toys, rocks, food) are
-# rarely furniture or vehicles; an inflated silhouette is the safer default.
-ORGANIC_TEMPLATE_SCORE = 0.85
-# Every template is built from straight boards. Below this share of straight
-# outline the object is free-form and no template is tried at all: a box-shaped
-# template always covers a compact blob well enough to score, which is how a
-# decorated egg used to come out as a bookshelf.
-TEMPLATE_MIN_STRAIGHTNESS = 0.15
 # A lathe sweeps the widest half of every row around the axis, so anything
 # off-axis (a handle, a cone leaning on top) turns into a ring. Only clearly
 # mirror-symmetric outlines are revolved.
 LATHE_MIN_SYMMETRY = 0.935
-# A fitted template may not cover more than this share of background: a
-# template that only fits by spilling over the backdrop is the wrong object.
-TEMPLATE_MAX_SPILL = 0.16
 
 CATEGORY_TEMPLATES = {
     "bed": "bed", "chair": "chair", "stool": "chair", "table": "table", "desk": "table",
@@ -123,32 +110,6 @@ def analyse(paths: Sequence[str], labels: Optional[Sequence[str]] = None, sensit
         lbl = (labels[i] if labels and i < len(labels) else ("front" if i == 0 else "auto"))
         out.append(Source(p, img, seg, feats, lbl))
     return out
-
-
-def _straightness(f: an.Features) -> float:
-    """0..1 evidence of man-made structure: axis-aligned straight segments in the photo."""
-    return min(1.0, (f.vertical_lines + f.horizontal_lines) / 20.0)
-
-
-def rank_categories(src: Source) -> List[Tuple[str, float]]:
-    """Deterministic prior over categories from silhouette and line features."""
-    f = src.features
-    s: Dict[str, float] = {}
-    straight = _straightness(f)
-    s["bed"] = 0.5 * straight + (0.4 if 1.2 < f.aspect < 3.5 else 0.0) + (0.2 if f.fill_ratio < 0.75 else 0.0)
-    s["sofa"] = 0.3 * straight + (0.4 if 1.4 < f.aspect < 4.0 else 0.0) + (0.3 if f.fill_ratio > 0.55 else 0.0)
-    s["table"] = 0.5 * straight + (0.3 if f.aspect > 0.9 else 0.0) + (0.3 if f.fill_ratio < 0.55 else 0.0)
-    s["chair"] = 0.5 * straight + (0.4 if 0.35 < f.aspect < 1.2 else 0.0) + (0.2 if f.fill_ratio < 0.6 else 0.0)
-    s["cabinet"] = 0.4 * straight + (0.4 if f.rectangularity > 0.8 else 0.0) + (0.2 if f.fill_ratio > 0.75 else 0.0)
-    s["shelf"] = 0.4 * straight + (0.4 if f.aspect < 0.8 else 0.0) + (0.2 if f.rectangularity > 0.75 else 0.0)
-    s["lamp"] = (0.6 if f.symmetry > 0.85 else 0.0) + (0.4 if f.aspect < 0.9 else 0.0)
-    s["house"] = 0.4 * straight + (0.3 if f.solidity > 0.85 else 0.0)
-    s["car"] = (0.4 if 1.6 < f.aspect < 4.5 else 0.0) + (0.3 if f.solidity > 0.8 else 0.0) + 0.2 * (1 - straight)
-    s["box"] = (0.6 if f.rectangularity > 0.85 and f.solidity > 0.9 else 0.0) + 0.2 * straight
-    s["revolve"] = (0.9 if f.symmetry > 0.9 and f.row_convexity > 0.95 else 0.0) + (0.2 if f.aspect < 1.4 else 0.0)
-    s["extrude"] = 0.8 * f.drawing_likeness + (0.2 if f.hole_count > 0 else 0.0)
-    s["inflate"] = 0.4 + 0.3 * (1 - straight)
-    return sorted(s.items(), key=lambda kv: -kv[1])
 
 
 # ---------------------------------------------------------------------------
@@ -935,11 +896,8 @@ def reconstruct_turntable(sources: Sequence[Source], height_studs: float, resolu
 
 MIN_PHOTO_SET = 4
 # A cut-out that runs along this share of the picture's edge has swallowed the
-# surroundings (a street, a room): templates would only fit the scene.
+# surroundings (a street, a room): no box is fitted to it.
 SCENE_EDGE_SHARE = 0.25
-# Templates whose real objects have see-through gaps; the others are closed
-# solids and cannot explain a hole in the silhouette (a mug handle).
-OPEN_TEMPLATES = ("chair", "table", "shelf", "bed")
 
 
 def border_contact(mask: np.ndarray, band: int = 2) -> float:
@@ -1019,73 +977,51 @@ def reconstruct(paths: Sequence[str], work_dir: str, mode: str = "auto", categor
         except ReconstructionError as exc:
             notes.append(f"Multi-image reconstruction was not possible ({exc}); the first image was reconstructed on its own.")
     src = sources[0]
-    ranking = rank_categories(src)
     chosen = None
     alternatives = []
     cat = (category or "auto").lower()
     if cat != "auto":
         chosen = CATEGORY_TEMPLATES.get(cat, cat)
         if chosen not in TEMPLATES and chosen not in GENERIC:
-            notes.append(f"Unknown category '{category}', detecting automatically instead.")
+            notes.append(f"Unknown category '{category}', the shape is modelled as it is instead.")
             chosen = None
     if chosen is None and mode == "single":
         chosen = "inflate"
     if chosen is None:
-        report("comparing object templates", 0.08)
-        target = make_target(src.image, src.seg)
+        # No object category is guessed: the shape decides. A flat drawing is
+        # extruded, a box-shaped body becomes a fitted box with its attached
+        # parts, a lathe-like outline is revolved, anything else is inflated.
+        report("measuring the shape", 0.08)
         f = src.features
         see_through = bool((src.seg.filled & ~open_silhouette(src)).sum() > 0.002 * src.seg.filled.sum())
         edge_share = border_contact(src.seg.filled)
         scene_like = src.seg.method != "alpha matte" and edge_share > SCENE_EDGE_SHARE
         if scene_like:
             notes.append(f"The cut-out touches {edge_share:.0%} of the picture's edge, so the object was probably not separated from its surroundings. "
-                         "No furniture or building template was tried. For a good model, photograph the object alone with some plain background around it.")
+                         "For a good model, photograph the object alone with some plain background around it.")
         lathe_like = f.symmetry > LATHE_MIN_SYMMETRY and f.row_convexity > 0.95 and not see_through
-        organic = f.solidity > 0.8 and _straightness(f) < 0.5
-        free_form = f.outline_straightness < TEMPLATE_MIN_STRAIGHTNESS
-        # The lamp template is itself a lathe shape: a revolve reproduces lathe-like
-        # silhouettes exactly, and other silhouettes cannot be lamps.
-        candidates = [] if (free_form or scene_like) else [c for c, _ in ranking if c in TEMPLATES and c != "box"
-                                                           and not (c == "lamp" and (lathe_like or f.row_convexity < 0.9))
-                                                           and not (see_through and c not in OPEN_TEMPLATES)][:6]
-        coarse = []
-        for c in candidates:
-            res = fit_template(get_template(c), target, coarse_only=True)
-            coarse.append((res.score, c))
-        coarse.sort()
-        shortlist = [c for _, c in coarse[:2]]
-        prior_best = next((c for c, _ in ranking if c in candidates), None)
-        if prior_best and prior_best not in shortlist:
-            shortlist.append(prior_best)
-        elif len(coarse) > 2:
-            shortlist.append(coarse[2][1])
-        coarse_by = {c: cs for cs, c in coarse}
-        scored = []
-        for i, (cs, c) in enumerate((coarse_by[c], c) for c in shortlist):
-            report(f"testing {c} template", 0.09 + 0.02 * i)
-            res = fit_template(get_template(c), target, max_evals=170)
-            spill = float(res.components.get("background_overlap", 0.0))
-            alternatives.append({"template": c, "coarse_score": round(cs, 4), "refined_score": round(res.score, 4), "background_overlap": round(spill, 3)})
-            if spill > TEMPLATE_MAX_SPILL:
-                notes.append(f"The {c} template was rejected: {spill:.0%} of it would cover background.")
-                continue
-            scored.append((res.score, c))
-        scored.sort()
-        accept = LATHE_TEMPLATE_SCORE if lathe_like else ORGANIC_TEMPLATE_SCORE if organic else TEMPLATE_ACCEPT_SCORE
-        if scored and scored[0][0] < accept:
-            chosen = scored[0][1]
-        elif f.drawing_likeness > 0.55:
+        if f.drawing_likeness > 0.55:
             chosen = "extrude"
-        elif lathe_like:
-            chosen = "revolve"
+            notes.append("Shape: flat artwork, extruded.")
         else:
-            chosen = "inflate"
-        if scored:
-            notes.append(f"Detected category: {chosen} (template scores: " + ", ".join(f"{c} {s:.2f}" for s, c in scored) + ").")
-        elif scene_like:
-            notes.append(f"Detected category: {chosen} (cut-out not separated from the surroundings).")
-        else:
-            notes.append(f"Detected category: {chosen} (curved outline, {f.outline_straightness:.0%} straight edges: furniture and building templates were not considered).")
+            x0, y0, x1, y1 = f.bbox
+            crop = sculpt.smooth_outline(open_silhouette(src))[y0:y1 + 1, x0:x1 + 1]
+            body, _, _ = sculpt.split_body(crop)
+            if not scene_like and composite.boxy(body):
+                report("fitting a box to the body", 0.12)
+                built = composite.reconstruct(src, crop, body)
+                if built is not None:
+                    spec, arrays, overlay = built
+                    spec["notes"] = notes + spec["notes"]
+                    spec["alternatives"] = []
+                    spec["mode"] = "A"
+                    spec["segmentation"] = {"method": src.seg.method, "confidence": round(src.seg.confidence, 3)}
+                    spec["features"] = f.to_dict()
+                    return Reconstruction(spec, arrays, overlay), sources
+                notes.append("The body has straight sides, but no box matched its outline; it was modelled as a free-form solid.")
+            chosen = "revolve" if lathe_like else "inflate"
+            notes.append("Shape: rotationally symmetric, revolved." if chosen == "revolve" else
+                         "Shape: free-form, every part as deep as it is wide in the photo.")
     report(f"reconstructing as {chosen}", 0.15)
     if chosen in TEMPLATES:
         def sub(msg, f):
@@ -1202,6 +1138,8 @@ def _field_mesh(field_vol: np.ndarray, origin, step: float, smooth_iters: int = 
 
 def build_generic_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> Scene:
     strategy = spec["strategy"]
+    if strategy == "composite":
+        return _composite_scene(spec, arrays, lod)
     mats = {k: MaterialSpec.from_dict(v) for k, v in spec.get("materials", {}).items()}
     if "surface" not in mats:
         mats["surface"] = make_material("surface", "photo", (0.7, 0.7, 0.7), name="Photo surface", source="photo projection")
@@ -1265,6 +1203,26 @@ def build_generic_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> 
     for p in parts:
         _assign_chart_uvs(p.mesh)
     return Scene(spec.get("name", "Model"), parts, mats, {"strategy": strategy, "smooth_surface": strategy in ("inflate", "visual_hull", "turntable")})
+
+
+def _composite_scene(spec: dict, arrays: Dict[str, np.ndarray], lod: LOD) -> Scene:
+    """Fitted box plus every attached part, each part moved to its place on the box."""
+    mats = {k: MaterialSpec.from_dict(v) for k, v in spec.get("materials", {}).items()}
+    body = get_template(spec["template"]).build(spec["params"], lod, dict(mats))
+    parts = list(body.parts)
+    for p in parts:
+        p.photo = True
+    for sub in spec.get("parts", []):
+        sc = build_generic_scene(sub, composite.part_arrays(arrays, sub["array_prefix"]), lod)
+        sc.transform(np.asarray(sub["placement"], dtype=np.float64))
+        for p in sc.parts:
+            p.name = sub["name"]
+            p.group = sub["name"]
+            p.photo = True
+            parts.append(p)
+    if "surface" not in mats:
+        mats["surface"] = make_material("surface", "photo", (0.7, 0.7, 0.7), name="Photo surface", source="photo projection")
+    return Scene(spec.get("name", "Model"), parts, {**body.materials, **mats}, {"strategy": "composite", "smooth_surface": False})
 
 
 def _profile_bands(profile: np.ndarray, n: int):
@@ -1343,6 +1301,8 @@ def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene, ar
     if not spec.get("photo_projection"):
         return None
     strategy = spec["strategy"]
+    if strategy == "composite":
+        return composite.projection(spec, sources, arrays or {}, photo_projection_for)
     if strategy in ("revolve", "extrude", "inflate"):
         src = sources[0]
         cam_spec = spec["camera"]

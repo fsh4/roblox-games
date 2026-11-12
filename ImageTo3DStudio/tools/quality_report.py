@@ -32,9 +32,9 @@ from engine.procedural import LOD, get_template  # noqa: E402
 from exporters import blender, convert  # noqa: E402
 
 CASES = [
-    {"name": "Bed", "images": ["bed_photo.jpg"], "category": "auto", "triangles": 5000, "texture": 1024, "note": "real photo supplied by the owner"},
-    {"name": "Chair", "images": ["chair_render.png"], "category": "auto", "triangles": 4000, "texture": 1024, "note": "synthetic Cycles render"},
-    {"name": "Table", "images": ["table_render.png"], "category": "auto", "triangles": 2000, "texture": 512, "note": "synthetic Cycles render"},
+    {"name": "Bed", "images": ["bed_photo.jpg"], "category": "bed", "triangles": 5000, "texture": 1024, "note": "real photo supplied by the owner"},
+    {"name": "Chair", "images": ["chair_render.png"], "category": "chair", "triangles": 4000, "texture": 1024, "note": "synthetic Cycles render"},
+    {"name": "Table", "images": ["table_render.png"], "category": "table", "triangles": 2000, "texture": 512, "note": "synthetic Cycles render"},
     {"name": "Vase", "images": ["vase_render.png"], "category": "auto", "triangles": 3000, "texture": 512, "note": "synthetic Cycles render"},
     {"name": "Plush", "images": ["plush_render.png"], "category": "auto", "triangles": 5000, "texture": 512, "note": "synthetic render, PNG with alpha"},
     {"name": "Emblem", "images": ["emblem_drawing.png"], "category": "auto", "triangles": 2000, "texture": 512, "note": "flat drawing, Pillow"},

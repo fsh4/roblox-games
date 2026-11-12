@@ -560,6 +560,23 @@ class PhotoProjection:
     relief: Optional[np.ndarray] = None
     surround: Optional[object] = None
     relief_back: Optional[np.ndarray] = None
+    post: Optional[np.ndarray] = None
+    per_part: Dict[str, "PhotoProjection"] = field(default_factory=dict)
+    fill_only: bool = False
+
+    def views(self) -> List["PhotoProjection"]:
+        """This projection, its extra views and every per-part projection (recursively)."""
+        out = [self] + list(self.extra)
+        for p in self.per_part.values():
+            out.extend(p.views())
+        return out
+
+    def set_pre(self, pre: np.ndarray) -> None:
+        """Scene-to-model transform for this projection; ``post`` (a mirror or a part placement) is applied after it."""
+        for view in [self] + list(self.extra):
+            view.pre = view.post @ pre if view.post is not None else pre
+        for p in self.per_part.values():
+            p.set_pre(pre)
 
 
 def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_verts: np.ndarray, all_faces: np.ndarray):
@@ -580,7 +597,8 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
     den = np.zeros(len(pos))
     conf = np.zeros(len(pos))
     diam = float(np.linalg.norm(all_verts.max(0) - all_verts.min(0)))
-    for view in [proj] + list(proj.extra):
+    ordered = sorted([proj] + list(proj.extra), key=lambda v: v.fill_only)
+    for view in ordered:
         cam = view.camera
         if view.wrap:
             wpos = pos @ view.pre[:3, :3].T + view.pre[:3, 3] if view.pre is not None else pos
@@ -622,6 +640,8 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
                 wgt = wgt * (view.mask[my, mx] > 0)
             if mirrored:
                 wgt = wgt * 0.8
+            if view.fill_only:
+                wgt = wgt * (conf < 0.1)
             if not np.any(wgt > 0):
                 continue
             col = render.sample_image_xy(view.image_lin, np.stack([xy[:, 0] * iw / w, xy[:, 1] * ih / h], axis=1))
@@ -893,8 +913,9 @@ def bake_scene(scene: Scene, options: BakeOptions, photo: Optional[PhotoProjecti
                 syn = ex.sample(uv)
                 mix = 0.8 if options.texture_style == "photo" else 0.6
                 ch.albedo = ch.albedo * (1 - mix) + syn * mix
-        if part.photo and photo is not None:
-            col, wgt = project_photo(tx, sel, photo, all_v, all_f)
+        part_photo = photo.per_part.get(part.name, photo) if photo is not None else None
+        if part.photo and part_photo is not None:
+            col, wgt = project_photo(tx, sel, part_photo, all_v, all_f)
             fallback = ch.albedo
             if np.any(wgt > 0.3):
                 seen = col[wgt > 0.3]
@@ -902,7 +923,7 @@ def bake_scene(scene: Scene, options: BakeOptions, photo: Optional[PhotoProjecti
                 fallback = ch.albedo / np.maximum(srgb_to_linear(np.asarray(mat.base_color)), 1e-3) * med
             ch.albedo = col * wgt[:, None] + fallback * (1 - wgt[:, None])
             if options.detail_normals:
-                bump = project_relief(tx, sel, photo)
+                bump = project_relief(tx, sel, part_photo)
                 if bump is not None:
                     ch.height = ch.height + bump
         albedo[sel] = ch.albedo

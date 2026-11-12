@@ -27,7 +27,9 @@ the evidence column says which.
 
 | Feature | Status | Evidence / notes |
 |---|---|---|
-| Automatic strategy and category selection | Done + tested | 6 of 6 single-image test inputs classified correctly (bed, chair, table, vase, plush, emblem); accuracy on arbitrary photos is unknown |
+| Automatic selection by shape only (no category guessing) | Done + tested | `tests/test_composite.py`: parcel photo becomes a box with the dessert on top; chair and table renders are never turned into a furniture template automatically |
+| Box with attached parts (fitted box, two-pass fit, GrabCut parts, ray placement) | Done + tested | Parcel photo: box 1.8 x 1.3 x 1.8 studs, 1 part on the lid, logo readable on the faces |
+| Furniture templates on request (category option) | Done + tested | Bed photo with `category=bed` (`test_bed_photo_is_reconstructed_as_a_bed`) |
 | Template fitting by analysis-by-synthesis: bed, chair, table | Done + tested | Real bed photo and two renders; fit scores in the test report |
 | Templates sofa, cabinet, shelf, lamp, house, car, box | Done, not fully tested | Geometry tested (closed solids, resizing); never fitted to a photo of that object type |
 | Repeated element counting (slats, rows, shelves, cushions) | Done, not fully tested | Runs on every template fit; counts not asserted by a test |

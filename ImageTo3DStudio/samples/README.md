@@ -12,6 +12,8 @@ Measured numbers are in [../docs/TEST_REPORT.md](../docs/TEST_REPORT.md).
 | Chair | chair_render.png | template (chair) | 3,900 | [Chair_v1.zip](Chair_v1.zip) | [preview](previews/Chair.png) |
 | Table | table_render.png | template (table) | 972 | [Table_v1.zip](Table_v1.zip) | [preview](previews/Table.png) |
 | Vase | vase_render.png | revolve, synthesised back | 2,852 | [Vase_v1.zip](Vase_v1.zip) | [preview](previews/Vase.png) |
+| Parcel | box_photo.jpg | box with a part on top (composite) | 5,000 | [Parcel_v1.zip](Parcel_v1.zip) | [preview](previews/Parcel.png) |
+| ParcelBlocky | box_photo.jpg | composite, blocky style | 2,468 | [ParcelBlocky_v1.zip](ParcelBlocky_v1.zip) | [preview](previews/ParcelBlocky.png) |
 | Egg | egg_photo.jpg | inflate, realistic, symmetric body | 5,000 | [Egg_v1.zip](Egg_v1.zip) | [preview](previews/Egg.png) |
 | EggBlocky | egg_photo.jpg | inflate, blocky style | 1,588 | [EggBlocky_v1.zip](EggBlocky_v1.zip) | [preview](previews/EggBlocky.png) |
 | EggCartoon | egg_photo.jpg | inflate, cartoon style | 5,000 | [EggCartoon_v1.zip](EggCartoon_v1.zip) | [preview](previews/EggCartoon.png) |
@@ -23,6 +25,8 @@ Measured numbers are in [../docs/TEST_REPORT.md](../docs/TEST_REPORT.md).
 | Emblem | emblem_drawing.png | extrude | 1,960 | [Emblem_v1.zip](Emblem_v1.zip) | [preview](previews/Emblem.png) |
 | Mug | 4 images | visual_hull | 4,000 | [Mug_v1.zip](Mug_v1.zip) | [preview](previews/Mug.png) |
 | ChairScan | 8 images | turntable | 4,000 | [ChairScan_v1.zip](ChairScan_v1.zip) | [preview](previews/ChairScan.png) |
+
+![Parcel](previews/Parcel.png)
 
 ![EggBlocky](previews/EggBlocky.png)
 

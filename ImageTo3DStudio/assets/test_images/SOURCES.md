@@ -5,6 +5,7 @@
 | `bed_photo.jpg` | Photo supplied by the project owner in the original request (product-style photo of a single bed). | Single-image template reconstruction (bed). |
 | `egg_photo.jpg` | Picture supplied by the project owner (decorated dessert egg on a grey backdrop with a cast shadow, three-quarter view). The first version of the engine built a bookshelf from it. | Free-form reconstruction, template gate, shadow removal, repeated-photo guard. |
 | `donut_synthetic.jpg`, `mug_synthetic.jpg` | Drawn by `tools/make_shapes.py` (shaded shapes on a grey gradient with a cast shadow and sensor noise). | Holes kept through the model; shadow inside a hole treated as background. |
+| `box_photo.jpg` | Picture supplied by the project owner (parcel box with a dessert on top, drips at the corners, printed logo, three-quarter view from above). The engine used to turn it into a sofa. | Shape-based selection: fitted box, a part standing on it, hidden faces filled from the opposite face. |
 | `chair_render.png` | Synthetic render made with Blender 5.2 Cycles by `tools/make_test_images.py` (turned legs, upholstered seat, slatted back, room set). | Template classification and fitting (chair). |
 | `table_render.png` | Synthetic render, same script (oak table on a studio backdrop). | Template fitting (table). |
 | `vase_render.png` | Synthetic render, same script (glazed lathe-turned vase). | Surface-of-revolution strategy. |

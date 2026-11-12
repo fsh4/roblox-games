@@ -26,7 +26,7 @@ def bed_project(tmp_path_factory):
     proj = tmp_path_factory.mktemp("bed_project")
     (proj / "source").mkdir()
     shutil.copy(image("bed_photo.jpg"), proj / "source" / "image_1.jpg")
-    spec = pipeline.analyse_project(str(proj), [str(proj / "source" / "image_1.jpg")], category="auto")
+    spec = pipeline.analyse_project(str(proj), [str(proj / "source" / "image_1.jpg")], category="bed")
     return proj, spec
 
 

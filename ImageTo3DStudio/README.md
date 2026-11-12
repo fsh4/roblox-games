@@ -121,6 +121,11 @@ can open or edit a project.
   the depth afterwards with `/3d edit` > Size.
 - Uploading the same photo twice does not help: repeats are ignored, and
   fewer than four unlabelled photos are treated as one photo.
+- You do not have to say what the object is. The shape decides: a box-like
+  body becomes a fitted box (things standing on it stay separate parts),
+  rounded objects become rounded solids, symmetric turned objects are
+  revolved, drawings are extruded. Furniture templates are used only if you
+  pick a `category` yourself.
 - Choose the look with `style` in `/3d create` or later with `/3d edit` >
   Art style: **Realistic** (photo texture), **Cartoon** (a few flat, bright
   colours) or **Blocky** (stacked coloured blocks with grooves, symmetric
