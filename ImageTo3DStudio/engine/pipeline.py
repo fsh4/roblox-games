@@ -22,6 +22,7 @@ from . import analyzer as an
 from . import geometry as g
 from . import optimization as opt
 from . import reconstruction as rc
+from . import stylize
 from . import textures as tx
 from .materials import MaterialSpec, make_material, parse_hex_color
 from .procedural import LOD, get_template, scale_params_to_dims
@@ -228,8 +229,32 @@ def build_version(project_dir: str, version_dir: str, spec: dict, arrays: Dict[s
                 view.pre = pre
     style = settings.texture_style
     ao_dirs = QUALITY[settings.quality]["ao_dirs"]
-    tex_set = tx.bake_scene(scene, tx.BakeOptions(resolution=settings.texture_resolution, ao_directions=ao_dirs, ao_in_color=settings.ao_in_color,
-                                                  detail_normals=QUALITY[settings.quality]["detail"], texture_style=style), photo, _staged(progress, 0.2, 0.62))
+    detail = QUALITY[settings.quality]["detail"]
+    ambient = True
+    ao_in_color = settings.ao_in_color
+    if settings.art_style == "cartoon":
+        if photo is not None:
+            stylize.cartoon_projection(photo)
+        stylize.cartoon_materials(scene)
+        detail, ao_in_color = False, min(ao_in_color, 0.15)
+        notes.append("Cartoon style: the photo was reduced to a few flat colours without its light and shadow.")
+    elif settings.art_style == "blocky":
+        if report:
+            report("building blocks", 0.2)
+        if photo is not None:
+            stylize.flatten_projection(photo)
+        source = tx.bake_scene(scene, tx.BakeOptions(resolution=512, ambient_occlusion=False, detail_normals=False, texture_style=style, keep_samples=True), photo)
+        plane = float(offset[0]) if spec.get("mirror_plane") else None
+        scene, look, block_notes = stylize.blocky_scene(scene, *source.samples, budget, title, plane, _region_lookup(spec, arrays, photo))
+        notes.extend(block_notes)
+        look.move(opt.place_pivot(scene, settings.pivot))
+        photo = tx.PhotoProjection(np.zeros((2, 2, 3)), None, None, mirror_axis=None, wrap=True, surround=look)
+        ambient, ao_in_color = False, 0.0
+        detail = True
+        budget_report = opt.BudgetReport(budget, scene.triangle_count, original_tris, original_verts, scene.vertex_count, "block rebuild", q,
+                                         scene.triangle_count <= budget * 1.05, 0, {"mean_deviation_percent": 0.0, "p95_deviation_percent": 0.0, "rating": "stylised"}, [])
+    tex_set = tx.bake_scene(scene, tx.BakeOptions(resolution=settings.texture_resolution, ao_directions=ao_dirs, ao_in_color=ao_in_color, ambient_occlusion=ambient,
+                                                  detail_normals=detail, texture_style=style), photo, _staged(progress, 0.2, 0.62))
     timings["textures"] = time.time() - t1
     notes.extend(tex_set.notes)
 
@@ -379,6 +404,25 @@ def build_version(project_dir: str, version_dir: str, spec: dict, arrays: Dict[s
     if report:
         report("package ready", 1.0)
     return VersionResult(package_dir, zip_path, files, stats, validation.warnings, notes, timings)
+
+
+def _region_lookup(spec: dict, arrays: Dict[str, np.ndarray], photo):
+    """Body (0) / accessory (1..n) / outside (-1) label of scene points, from the stored 2D regions."""
+    if photo is None or photo.camera is None or "regions" not in arrays or "bbox" not in spec:
+        return None
+    regions = np.asarray(arrays["regions"]).astype(np.int64)
+    x0, y0 = spec["bbox"][0], spec["bbox"][1]
+    full = rc.paste(np.full((photo.camera.height, photo.camera.width), -1, np.int64), regions, x0, y0)
+    pre = photo.pre if photo.pre is not None else np.eye(4)
+
+    def lookup(points: np.ndarray) -> np.ndarray:
+        model = points @ pre[:3, :3].T + pre[:3, 3]
+        xy, _, _ = photo.camera.project(model)
+        xi = np.clip(np.round(xy[:, 0]).astype(np.int64), 0, full.shape[1] - 1)
+        yi = np.clip(np.round(xy[:, 1]).astype(np.int64), 0, full.shape[0] - 1)
+        return full[yi, xi]
+
+    return lookup
 
 
 def _recommended_texture(size) -> int:

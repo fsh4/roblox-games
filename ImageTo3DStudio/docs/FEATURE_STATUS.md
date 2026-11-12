@@ -36,6 +36,9 @@ the evidence column says which.
 | Surface of revolution (vases, bottles, lamps) | Done + tested | Vase, chosen automatically |
 | Extrusion of flat artwork with holes | Done + tested | Emblem, chosen automatically, centre hole kept |
 | Free-form objects: medial-ball inflation, flat base, wrap projection, photo relief | Done + tested | Egg photo and plush, chosen automatically; `tests/test_sculpt.py` (disc gives a sphere within 12 % volume, thin parts stay thin) |
+| Art styles: realistic, cartoon, blocky | Done + tested | `tests/test_stylize.py`; egg, plush and mug samples in every style checked from four sides |
+| Blocky: symmetric body, per-part colours, staggered slabs with grooves, eye highlights, no studs | Done + tested | `test_blocky_model_is_valid_and_has_no_studs`, `test_blocky_plush_gets_eye_highlights`, `test_eyes_need_a_mirrored_pair` |
+| Body made exactly symmetric, accessories kept in place | Done + tested | `test_nearly_symmetric_body_becomes_exactly_symmetric_and_keeps_its_accessory`; egg 96 %, plush 99 %, mug 97 % |
 | Synthesised back (camera elevation, lighting-free quilting, no copied details) | Done + tested | `tests/test_surround.py`: elevation of the egg photo found (15-40 degrees), back differs from the mirrored front, azimuth continuous on the body; egg, plush, vase, donut and mug samples checked from four sides |
 | See-through openings kept (handles, rings) | Done + tested | `test_see_through_hole_is_kept`: donut mesh has exactly one hole |
 | Busy backgrounds and letterboxed pictures | Done, not fully tested | `test_letterbox_bars_are_removed`; centred graph cut checked by eye on five street and nature photos (not in the repository) |

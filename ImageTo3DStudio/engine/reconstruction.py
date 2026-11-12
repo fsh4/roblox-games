@@ -486,9 +486,11 @@ def reconstruct_inflate(src: Source, height_studs: float, depth_scale: float = 1
     """Rounded solid from one silhouette; see ``engine.sculpt``."""
     x0, y0, x1, y1 = src.features.bbox
     k = _px_to_studs(src, height_studs)
-    cx = (x0 + x1) / 2.0
-    width = (x1 - x0 + 1) * k
-    mask = sculpt.smooth_outline(open_silhouette(src))[y0:y1 + 1, x0:x1 + 1]
+    parts = sculpt.shape_parts(sculpt.smooth_outline(open_silhouette(src))[y0:y1 + 1, x0:x1 + 1])
+    mask = parts.mask
+    cx0 = x0 - parts.pad_left
+    cx = cx0 + (mask.shape[1] - 1) / 2.0
+    width = mask.shape[1] * k
     flat_base = sculpt.flat_edge_share(mask, "bottom") >= sculpt.FLAT_SHARE
     flat_top = sculpt.flat_edge_share(mask, "top") >= 0.6
     h2, _ = sculpt.thickness_field(mask, flat_base, flat_top)
@@ -497,6 +499,10 @@ def reconstruct_inflate(src: Source, height_studs: float, depth_scale: float = 1
              "The unseen back is textured from the materials of the front (patch synthesis), without copying its unique details."]
     if flat_base:
         notes.append("A straight bottom edge was found, so the model stands on a flat base.")
+    if parts.symmetric:
+        notes.append(f"The body is {parts.symmetry:.0%} mirror-symmetric in the photo and was made exactly symmetric.")
+    if parts.accessories:
+        notes.append(f"{parts.accessories} part{'s' if parts.accessories > 1 else ''} sticking out of the body (decoration, handle, ears) kept where the photo shows {'them' if parts.accessories > 1 else 'it'}.")
     openings = int(cv2.connectedComponents((~mask & sculpt.fill_outline(mask)).astype(np.uint8))[0] - 1)
     if openings:
         notes.append(f"{openings} see-through opening{'s were' if openings > 1 else ' was'} kept as a hole through the model.")
@@ -504,13 +510,14 @@ def reconstruct_inflate(src: Source, height_studs: float, depth_scale: float = 1
         "strategy": "inflate", "category": "inflate", "inflate_model": "balls",
         "dimensions": [float(width), float(height_studs), float(depth)],
         "depth_scale": float(depth_scale), "flat_base": bool(flat_base), "flat_top": bool(flat_top),
-        "bbox": [int(x0), int(y0), int(x1), int(y1)],
+        "bbox": [int(cx0), int(y0), int(cx0 + mask.shape[1] - 1), int(y1)],
         "camera": _front_camera(src, k, (cx, y1)),
+        "mirror_plane": bool(parts.symmetric), "accessories": int(parts.accessories),
         "confidence": round(0.4 + 0.45 * src.seg.confidence, 3),
         "notes": notes,
         "photo_projection": True,
     }
-    return Reconstruction(spec, {"mask": mask.astype(np.uint8), "thickness": h2.astype(np.float32)})
+    return Reconstruction(spec, {"mask": mask.astype(np.uint8), "thickness": h2.astype(np.float32), "regions": parts.regions.astype(np.int16)})
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +600,17 @@ def reconstruct_visual_hull(sources: Sequence[Source], height_studs: float, reso
         "photo_projection": True,
     }
     return Reconstruction(spec, {"occupancy": occ.astype(np.uint8), "field": _store_field(field_vol, step)})
+
+
+def paste(canvas: np.ndarray, crop: np.ndarray, x0: int, y0: int) -> np.ndarray:
+    """Copy ``crop`` into ``canvas`` with its top-left corner at (x0, y0), clipped to the canvas."""
+    h, w = crop.shape[:2]
+    H, W = canvas.shape[:2]
+    cx0, cy0 = max(x0, 0), max(y0, 0)
+    cx1, cy1 = min(x0 + w, W), min(y0 + h, H)
+    if cx1 > cx0 and cy1 > cy0:
+        canvas[cy0:cy1, cx0:cx1] = crop[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0]
+    return canvas
 
 
 def open_silhouette(src: Source) -> np.ndarray:
@@ -1335,9 +1353,8 @@ def photo_projection_for(spec: dict, sources: Sequence[Source], scene: Scene, ar
         cam = render.Camera(view, w, h, ortho_scale=ppm, cx=ox, cy=oy)
         if spec.get("inflate_model") == "balls":
             x0, y0, x1, y1 = spec["bbox"]
-            inside = np.zeros(src.image.rgb.shape[:2], bool)
-            stored = np.asarray(arrays["mask"]) > 0 if arrays and "mask" in arrays else src.seg.filled[y0:y1 + 1, x0:x1 + 1]
-            inside[y0:y1 + 1, x0:x1 + 1] = stored
+            stored = np.asarray(arrays["mask"]) > 0 if arrays and "mask" in arrays else src.seg.filled[y0:y1 + 1, max(x0, 0):x1 + 1]
+            inside = paste(np.zeros(src.image.rgb.shape[:2], bool), stored, x0, y0)
             extended = sculpt.extend_colours(src.image.rgb, inside)
             img = srgb_to_linear(extended.astype(np.float64) / 255.0)
             relief = sculpt.photo_relief(extended, inside, spec["dimensions"][1])

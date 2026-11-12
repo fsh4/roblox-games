@@ -93,7 +93,7 @@ def project_embed(project, versions: List, latest_stats: Optional[dict], spec: O
 
 def settings_summary(s: BuildSettings) -> str:
     dims = "auto" if not s.dimensions else " x ".join("-" if d is None else f"{d:g}" for d in s.dimensions)
-    return (f"Triangles **{s.triangle_budget:,}**  |  texture **{s.texture_resolution}px** ({s.texture_style})\n"
+    return (f"Style **{s.art_style}**  |  triangles **{s.triangle_budget:,}**  |  texture **{s.texture_resolution}px** ({s.texture_style})\n"
             f"Quality **{s.quality}**  |  shading **{s.shading}**  |  bevel x{s.bevel:g}\n"
             f"Size {dims} studs, scale x{s.scale:g}  |  pivot {s.pivot}  |  collision {s.collision}  |  meshes {s.mesh_grouping}")
 

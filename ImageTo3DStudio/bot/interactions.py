@@ -84,7 +84,7 @@ class StudioService:
 
     async def start_create(self, interaction: discord.Interaction, attachments: Sequence[discord.Attachment], *, mode: str = "auto",
                            category: str = "auto", views: str = "", triangles: Optional[int] = None, texture: Optional[int] = None,
-                           quality: Optional[str] = None, name: Optional[str] = None) -> None:
+                           quality: Optional[str] = None, name: Optional[str] = None, style: Optional[str] = None) -> None:
         defaults: UserDefaults = await asyncio.to_thread(self.projects.get_defaults, interaction.user.id)
         private = bool(defaults.private_results)
         if not interaction.response.is_done():
@@ -127,7 +127,7 @@ class StudioService:
         labels = [v.strip().lower() for v in views.replace(";", ",").split(",") if v.strip()] if views else None
         settings = BuildSettings(
             triangle_budget=int(triangles or defaults.triangle_budget), texture_resolution=int(texture or defaults.texture_resolution),
-            quality=quality or defaults.quality, shading=defaults.shading, collision=defaults.collision).validated()
+            quality=quality or defaults.quality, shading=defaults.shading, collision=defaults.collision, art_style=style or "realistic").validated()
         payload_extra = {"images": names, "mode": mode, "category": category, "view_labels": labels, "sensitivity": 0.5}
         await self._enqueue(interaction, project, settings, None, "initial generation", "create", payload_extra, private)
 

@@ -18,6 +18,7 @@ full depth and is cut flat instead of tapering to a point.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Tuple
 
 import cv2
@@ -203,3 +204,114 @@ def photo_relief(rgb: np.ndarray, inside: np.ndarray, height_studs: float, amoun
     broad = cv2.GaussianBlur(light, (0, 0), max(2.5, size / 45.0))
     band = np.tanh((fine - broad) / 0.08)
     return (band * amount * float(height_studs)).astype(np.float32)
+
+
+SYMMETRY_MIN = 0.86
+ACCESSORY_MIN_SHARE = 0.004
+
+
+@dataclass
+class ShapeParts:
+    """The silhouette split into a body and accessories, with the body made symmetric.
+
+    ``mask`` is the final silhouette, padded on the left by ``pad_left`` columns
+    (and on the right as needed) so that, when the body is symmetric, its
+    mirror axis is the centre column. ``regions`` holds 0 for the body and
+    1..n for the accessories (a cone, a fruit, a flower on top).
+    """
+
+    mask: np.ndarray
+    regions: np.ndarray
+    pad_left: int
+    symmetry: float
+    symmetric: bool
+    accessories: int
+
+
+def _sdf(mask: np.ndarray) -> np.ndarray:
+    m = mask.astype(np.uint8)
+    inside = cv2.distanceTransform(m, cv2.DIST_L2, 5)
+    outside = cv2.distanceTransform(1 - m, cv2.DIST_L2, 5)
+    return inside - outside
+
+
+def _mirror_score(mask: np.ndarray) -> Tuple[float, int]:
+    """Best vertical mirror axis (integer column) and the IoU of the mask with its mirror."""
+    cols = np.flatnonzero(mask.any(axis=0))
+    if len(cols) < 4:
+        return 0.0, int(mask.shape[1] // 2)
+    best = (0.0, int((cols[0] + cols[-1]) // 2))
+    lo, hi = cols[0] + 0.35 * (cols[-1] - cols[0]), cols[0] + 0.65 * (cols[-1] - cols[0])
+    for a in range(int(np.floor(lo)), int(np.ceil(hi)) + 1):
+        width = 2 * max(a, mask.shape[1] - 1 - a) + 1
+        left = (width - 1) // 2 - a
+        pad = np.zeros((mask.shape[0], width), bool)
+        pad[:, left:left + mask.shape[1]] = mask
+        inter = np.logical_and(pad, pad[:, ::-1]).sum()
+        union = np.logical_or(pad, pad[:, ::-1]).sum()
+        score = inter / max(union, 1)
+        if score > best[0]:
+            best = (float(score), a)
+    return best
+
+
+def shape_parts(mask: np.ndarray) -> ShapeParts:
+    """Split off thin protrusions as accessories and make a nearly symmetric body exactly symmetric.
+
+    The body is what survives a morphological opening with a disc of 18 % of
+    the object's smaller side (thin parts sticking out do not). If the body
+    is less than 45 % of the silhouette the object is made of thin parts (a
+    sword, a stick figure) and stays one piece. A body whose mirror image
+    overlaps it by at least ``SYMMETRY_MIN`` is replaced by the average of
+    its signed distance and the mirrored one, which keeps its size and makes
+    it exactly symmetric; accessories keep their place from the photo.
+    """
+    mask = mask.astype(bool)
+    h, w = mask.shape
+    r = max(2, int(round(0.18 * min(h, w))))
+    body = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(body.astype(np.uint8), connectivity=8)
+    if n > 1:
+        body = lab == 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    grow = max(1, r // 6)
+    body = (cv2.dilate(body.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * grow + 1, 2 * grow + 1))) > 0) & mask
+    total = float(mask.sum())
+    if body.sum() < 0.45 * total:
+        body = mask.copy()
+    rest = mask & ~body
+    count, acc, stats, _ = cv2.connectedComponentsWithStats(rest.astype(np.uint8), connectivity=8)
+    accessories = np.zeros((h, w), np.int32)
+    k = 0
+    for i in range(1, count):
+        if stats[i, cv2.CC_STAT_AREA] >= ACCESSORY_MIN_SHARE * total:
+            k += 1
+            accessories[acc == i] = k
+    score, axis = _mirror_score(body)
+    if score < SYMMETRY_MIN:
+        regions = np.where(mask, 0, -1).astype(np.int32)
+        regions[accessories > 0] = accessories[accessories > 0]
+        return ShapeParts(mask, regions, 0, score, False, k)
+    width = 2 * max(axis, w - 1 - axis) + 1
+    left = (width - 1) // 2 - axis
+
+    def pad(a, fill=0):
+        out = np.full((h, width), fill, a.dtype)
+        out[:, left:left + w] = a
+        return out
+
+    sdf = _sdf(pad(body))
+    sym_body = (sdf + sdf[:, ::-1]) / 2.0 > 0
+    acc_p = pad(accessories)
+    has_acc = acc_p > 0
+    bridge = (cv2.dilate(has_acc.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & (cv2.dilate(sym_body.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & pad(mask)
+    final = sym_body | has_acc | bridge
+    real_holes = pad(fill_outline(mask) & ~mask)
+    gaps = fill_outline(final) & ~final
+    count_g, gap_lab = cv2.connectedComponents(gaps.astype(np.uint8), connectivity=4)
+    for i in range(1, count_g):
+        g = gap_lab == i
+        if not (g & real_holes).any():
+            final |= g
+    regions = np.where(final, 0, -1).astype(np.int32)
+    regions[has_acc] = acc_p[has_acc]
+    return ShapeParts(final, regions, left, score, True, k)

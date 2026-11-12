@@ -267,6 +267,60 @@ largest visible flat face is perspective-rectified into an exemplar patch.
   marching-cubes facets print bands into the baked normal map. After
   decimation the low mesh takes its shading normals from the dense surface.
 
+## Art styles (engine/stylize.py)
+
+`BuildSettings.art_style` picks the look of a version; the analysis is shared,
+so `/3d edit` > Art style switches between them without re-analysing.
+
+| Style | What it does |
+|---|---|
+| `realistic` | Photo texture, synthesised back (default). |
+| `cartoon` | Every photo of the projection (and the synthesised back) is turned into flat colours: broad lightness changes removed (Gaussian at 1/8 of the object, 60 %), mean-shift and bilateral smoothing, 8 colours by k-means in CIELAB (lightness weighted 0.45), near-duplicates merged, up to 3 accent colours for small, clearly different, saturated or very dark/light regions, median-filtered labels, colours saturated by 18 %. Procedural materials become plastic of their own colour. No relief map, occlusion in the colour at most 15 %. |
+| `blocky` | The hand-built block look of many Roblox games (no studs). See below. |
+
+`blocky`:
+1. The photo's light and shadow are flattened, the realistic model is baked
+   once at 512 px and its texels are kept as colour samples.
+2. The solid is voxelized (trimesh) with 16 cubes along its longest side,
+   larger if the triangle budget needs it (never fewer than 10). Cells are
+   centred on multiples of the cube size measured from the body's mirror
+   plane, so mirrored cells line up; the body is then made exactly symmetric
+   (union with its mirror image; accessories are not mirrored). Edge-only
+   contacts between cubes are filled, so the surface stays manifold.
+3. Each outer cube takes the median colour of the 160 texel samples under its
+   face, unless a much lighter or darker feature covers 15 % of it (an eye is
+   one cube). The body and every accessory get their own palette (6 and 2
+   colours, near-duplicates merged at ΔE 20, accents for the body),
+   practically identical colours across regions (ΔE 12) are unified, a
+   majority filter over 26 neighbours removes noise but never merges clearly
+   different colours (ΔE 42), and if at least 70 % of mirrored body cubes
+   already agree, the rest are matched (the rarer colour wins).
+4. Same-coloured cubes are grouped into slabs of up to 4 x 1 x 4 cubes, with
+   the order of the horizontal axes alternating per layer so seams stagger.
+   The texture darkens the 7 % of each slab next to its border (a groove)
+   and lifts the band just inside it; the normal map lowers the border, which
+   reads as a bevel.
+5. Eyes: two small (at most 6 cubes) very dark spots on the front, level,
+   mirror images of each other, at least 55 % surrounded by the main body
+   colour, in the upper two thirds. The upper-left cube of each gets a large
+   and a small white highlight square.
+6. No occlusion is baked. The `.rbxm` holds one coloured Part per slab
+   (up to 600).
+
+## Shape: body and accessories (engine/sculpt.py `shape_parts`)
+
+Before inflation the silhouette is split: the body is what survives an
+opening with a disc of 18 % of the smaller side; components of the rest
+larger than 0.4 % of the silhouette are accessories (a cone, ears, a handle).
+If the body is under 45 % of the silhouette the object is made of thin parts
+and stays whole. A body whose mirror image overlaps it by at least 86 % is
+replaced by the average of its signed distance field and the mirrored one
+(exactly symmetric, same size), its axis becomes the model's X = 0 plane,
+accessories keep their place, small gaps created between them and the body
+are bridged, and enclosed gaps that were not see-through holes in the photo
+are filled. The regions are stored with the spec, so styles can colour
+accessories separately.
+
 ## Procedural modelling (engine/procedural.py, engine/geometry.py)
 
 Components: bevelled/rounded boards (`box` with per-face grids and analytic

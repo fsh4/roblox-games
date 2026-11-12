@@ -635,11 +635,15 @@ def project_photo(texels: Texels, sel: np.ndarray, proj: PhotoProjection, all_ve
 
 def project_relief(texels: Texels, sel: np.ndarray, proj: PhotoProjection) -> Optional[np.ndarray]:
     """Height offsets (studs) for the selected texels from a wrap projection's relief image."""
-    if not proj.wrap or proj.relief is None:
+    if not proj.wrap:
         return None
     pos = texels.pos[sel]
     if proj.pre is not None:
         pos = pos @ proj.pre[:3, :3].T + proj.pre[:3, 3]
+    if proj.surround is not None and hasattr(proj.surround, "height"):
+        return proj.surround.height(pos)
+    if proj.relief is None:
+        return None
     if proj.surround is not None and proj.relief_back is not None:
         return proj.surround.sample(pos, proj.relief, proj.relief_back)
     xy, _, _ = proj.camera.project(pos)
@@ -812,6 +816,7 @@ class BakeOptions:
     ground_occlusion: bool = True
     detail_normals: bool = True
     texture_style: str = "auto"
+    keep_samples: bool = False
 
 
 @dataclass
@@ -822,6 +827,7 @@ class TextureSet:
     utilization: float
     island_count: int
     notes: List[str] = field(default_factory=list)
+    samples: Optional[tuple] = None
 
     def save(self, folder: str) -> Dict[str, str]:
         import os
@@ -906,6 +912,9 @@ def bake_scene(scene: Scene, options: BakeOptions, photo: Optional[PhotoProjecti
         emis[sel] = ch.emissive
         alpha[sel] = ch.alpha
     report("materials synthesised", 0.45)
+    if options.keep_samples:
+        samples = (tx.pos.copy(), albedo.copy())
+        return TextureSet({}, res, atlas.density, atlas.utilization, len(atlas.islands), notes, samples)
 
     ao = np.ones(n)
     if options.ambient_occlusion and n:

@@ -218,6 +218,7 @@ class UploadPrompt(discord.ui.View):
 # ---------------------------------------------------------------------- edit panel
 
 EDIT_OPTIONS = [
+    ("style", "Art style", "Realistic photo, cartoon colours or stacked blocks"),
     ("budget", "Triangle budget", "Exact or preset triangle count"),
     ("size", "Size and scale", "Width / height / depth in studs, or a scale factor"),
     ("textures", "Textures", "Resolution, style, ambient occlusion"),
@@ -260,7 +261,9 @@ class EditPanel(discord.ui.View):
             return
         key = self.sel.values[0]
         s = self.settings
-        if key == "budget":
+        if key == "style":
+            await svc.reply(interaction, content=f"Current style: **{s.art_style}**. Pick a new look:", view=StylePicker(self.pid, self.ver, s), ephemeral=True)
+        elif key == "budget":
             await interaction.response.send_modal(BudgetModal(self.pid, self.ver, s))
         elif key == "size":
             await interaction.response.send_modal(SizeModal(self.pid, self.ver, s))
@@ -293,6 +296,28 @@ class EditPanel(discord.ui.View):
             await svc.queue_build(interaction, project, self.ver, ns, f"higher detail from v{self.ver}")
         elif key == "rebuild":
             await svc.queue_build(interaction, project, self.ver, s, f"rebuild of v{self.ver}")
+
+
+class StylePicker(discord.ui.View):
+    LABELS = {"realistic": ("Realistic", "Photo texture, synthesised back"), "cartoon": ("Cartoon", "A few flat, bright colours, no photo lighting"),
+              "blocky": ("Blocky", "Stacked coloured blocks with grooves, symmetric body")}
+
+    def __init__(self, pid: str, ver: int, s: BuildSettings):
+        super().__init__(timeout=600)
+        self.pid, self.ver, self.s = pid, ver, s
+        sel = discord.ui.Select(placeholder="Art style", options=[discord.SelectOption(label=l, value=k, description=d, default=(k == s.art_style))
+                                                                  for k, (l, d) in self.LABELS.items()])
+        sel.callback = self._pick
+        self.sel = sel
+        self.add_item(sel)
+
+    async def _pick(self, interaction: discord.Interaction):
+        svc = _svc(interaction)
+        project = await svc.load_project(interaction, self.pid, edit=True)
+        if project is None:
+            return
+        style = self.sel.values[0]
+        await svc.queue_build(interaction, project, self.ver, _copy(self.s, art_style=style), f"{self.LABELS[style][0].lower()} style from v{self.ver}")
 
 
 def _copy(s: BuildSettings, **changes) -> BuildSettings:

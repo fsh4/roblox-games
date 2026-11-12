@@ -13,6 +13,7 @@ PIVOTS = ("bottom", "center", "back", "origin")
 GROUPINGS = ("merged", "parts")
 SHADING = ("smooth", "flat")
 TEXTURE_STYLES = ("auto", "procedural", "photo")
+ART_STYLES = ("realistic", "cartoon", "blocky")
 
 _LIMITS = {
     "triangle_budget": (60, 60_000),
@@ -39,6 +40,7 @@ class BuildSettings:
     pivot: str = "bottom"
     mesh_grouping: str = "merged"
     texture_style: str = "auto"
+    art_style: str = "realistic"
     ao_in_color: float = 0.55
     low_poly: bool = False
     sensitivity: float = 0.5
@@ -64,6 +66,10 @@ class BuildSettings:
             s.shading = "smooth"
         if s.texture_style not in TEXTURE_STYLES:
             s.texture_style = "auto"
+        if s.art_style == "studs":
+            s.art_style = "blocky"
+        if s.art_style not in ART_STYLES:
+            s.art_style = "realistic"
         if s.dimensions is not None:
             dims = [None if d in (None, 0) else float(min(max(float(d), 0.1), 2048.0)) for d in list(s.dimensions)[:3]]
             s.dimensions = dims if any(d is not None for d in dims) else None

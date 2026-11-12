@@ -228,3 +228,20 @@ donut are drawn by `tools/make_shapes.py`.
 Not checked: Roblox Studio import of the new packages, photos of people or
 characters with arms in front of the body (parts that overlap in the photo
 are still one solid).
+
+## Update 2026-11-12: Roblox art styles, symmetric shapes
+
+Owner feedback on the toy-brick test: no studs on top, look at the reference
+block models (stacked blocks with grooves, square eyes, symmetric), better
+colours, accessories and symmetry.
+
+| Check | Result |
+|---|---|
+| Studs | removed; old `studs` settings open as `blocky` |
+| Egg, blocky | 1,588 triangles, symmetric body, strawberry and cone kept as their own colours, no false eyes |
+| Plush, blocky | 2 colours, two square eyes with highlights, symmetric |
+| Mug, blocky | one red, handle hole kept |
+| Egg, cartoon / realistic | symmetric body (96 % in the photo), cone kept as an accessory |
+| Validation | every sample watertight, no warnings |
+
+Test suite: 100 passed, 1 skipped (the Blender cross-check; Blender is not installed here), 10 min 54 s.

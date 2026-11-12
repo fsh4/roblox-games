@@ -121,6 +121,14 @@ can open or edit a project.
   the depth afterwards with `/3d edit` > Size.
 - Uploading the same photo twice does not help: repeats are ignored, and
   fewer than four unlabelled photos are treated as one photo.
+- Choose the look with `style` in `/3d create` or later with `/3d edit` >
+  Art style: **Realistic** (photo texture), **Cartoon** (a few flat, bright
+  colours) or **Blocky** (stacked coloured blocks with grooves, symmetric
+  body, eyes with highlights, no studs), the hand-built look of many Roblox
+  games.
+- Nearly symmetric objects are made exactly symmetric; parts sticking out
+  (a cone, ears, a handle) stay where the photo shows them and get their own
+  colours.
 - The unseen back is textured from the materials of the photo (cake layers
   continue, fur stays fur) without copying unique details such as eyes or a
   logo. Holes you can see through (a mug handle) stay holes.

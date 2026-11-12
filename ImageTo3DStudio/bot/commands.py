@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, List, Optional
 import discord
 from discord import app_commands
 
+from engine.settings import ART_STYLES
+
 from . import embeds
 from .views import (CATEGORY_CHOICES, CancelPicker, ConfirmDelete, ExportPicker, HistoryView, SettingsView, UploadPrompt,
                     open_edit_panel, open_versions, show_project)
@@ -16,6 +18,8 @@ if TYPE_CHECKING:
     from .interactions import StudioService
 
 PAGE = 10
+
+STYLE_LABELS = {"realistic": "Realistic (photo texture)", "cartoon": "Cartoon (flat bright colours)", "blocky": "Blocky (stacked blocks, symmetric)"}
 
 CATEGORY_LABELS = {
     "auto": "Auto detect", "bed": "Bed", "chair": "Chair / stool", "table": "Table / desk", "sofa": "Sofa", "cabinet": "Cabinet / dresser",
@@ -59,23 +63,25 @@ class StudioCommands(app_commands.Group):
         category="What the object is (auto detects furniture, vehicles, buildings and generic shapes)",
         mode="auto, single (one-photo generic reconstruction) or multi (several photos)",
         views="For several photos: their directions, e.g. front,side,back,top",
-        triangles="Triangle budget (60 - 60,000)", texture="Texture atlas size", quality="Geometry and baking quality", name="Model name")
+        triangles="Triangle budget (60 - 60,000)", texture="Texture atlas size", quality="Geometry and baking quality", name="Model name",
+        style="Look of the model: photo texture, cartoon colours or stacked blocks")
     @app_commands.choices(
         category=[app_commands.Choice(name=CATEGORY_LABELS[c], value=c) for c in CATEGORY_CHOICES],
         mode=[app_commands.Choice(name=n, value=n) for n in ("auto", "single", "multi")],
         texture=[app_commands.Choice(name=f"{r} x {r}", value=r) for r in (256, 512, 1024, 2048)],
-        quality=[app_commands.Choice(name=q, value=q) for q in ("draft", "standard", "high")])
+        quality=[app_commands.Choice(name=q, value=q) for q in ("draft", "standard", "high")],
+        style=[app_commands.Choice(name=STYLE_LABELS[s], value=s) for s in ART_STYLES])
     async def create(self, interaction: discord.Interaction, image: Optional[discord.Attachment] = None, image2: Optional[discord.Attachment] = None,
                      image3: Optional[discord.Attachment] = None, image4: Optional[discord.Attachment] = None, category: str = "auto", mode: str = "auto",
                      views: Optional[str] = None, triangles: Optional[app_commands.Range[int, 60, 60000]] = None, texture: Optional[int] = None,
-                     quality: Optional[str] = None, name: Optional[app_commands.Range[str, 1, 60]] = None):
+                     quality: Optional[str] = None, name: Optional[app_commands.Range[str, 1, 60]] = None, style: Optional[str] = None):
         files = [a for a in (image, image2, image3, image4) if a is not None]
         if not files:
             emb = embeds.info_embed("New 3D model", "Upload one photo, or several photos of the same object from different sides.\n"
                                     "Tip: plain background, whole object visible, light from the front.")
             await interaction.response.send_message(embed=emb, view=UploadPrompt(self.svc), ephemeral=True)
             return
-        await self.svc.start_create(interaction, files, mode=mode, category=category, views=views or "", triangles=triangles, texture=texture, quality=quality, name=name)
+        await self.svc.start_create(interaction, files, mode=mode, category=category, views=views or "", triangles=triangles, texture=texture, quality=quality, name=name, style=style)
 
     @app_commands.command(name="edit", description="Change a model without re-uploading the photo")
     @app_commands.describe(project="Project to edit (latest if empty)")
